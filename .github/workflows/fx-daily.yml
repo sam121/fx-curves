@@ -1,0 +1,27 @@
+name: Fetch FX daily
+on:
+  schedule:
+    - cron: "7 2 * * *"   # once per day at 02:07 UTC
+  workflow_dispatch:       # manual trigger
+permissions:
+  contents: write
+jobs:
+  fetch-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Fetch latest FX data
+        env:
+          WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
+          PROFILE_ID: ${{ vars.PROFILE_ID || '14878042' }}
+        run: bash scripts/fetch_fx.sh
+      - name: Commit & push data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/latest.json data/history/*.jsonl || true
+          git commit -m "chore(data): daily update $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes to commit"
+          git push

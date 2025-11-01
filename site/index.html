@@ -1,0 +1,85 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>FX Cost Curves</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; }
+    .grid { display: grid; gap: 24px; grid-template-columns: 1fr; }
+    @media (min-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } }
+    .card { padding: 16px; border: 1px solid #eee; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
+    .muted { color:#666; font-size: 14px; }
+    .toolbar { margin: 8px 0 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    select, label { font-size:14px; }
+  </style>
+</head>
+<body>
+  <h1>FX Cost Curves</h1>
+  <p class="muted">Daily Wise quotes. Y-axis is fee in <b>bps vs mid outcome</b>. X-axis is source amount.</p>
+
+  <div class="toolbar">
+    <label>Mode:
+      <select id="mode">
+        <option value="ALL">ALL</option>
+        <option>BALANCE</option>
+        <option>BANK_TRANSFER</option>
+      </select>
+    </label>
+  </div>
+
+  <div id="charts" class="grid"></div>
+
+  <script>
+    async function loadRows() {
+      const res = await fetch('../data/latest.json', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Failed to fetch data');
+      return res.json();
+    }
+    function group(rows, modeFilter) {
+      const map = new Map();
+      for (const r of rows) {
+        if (modeFilter !== 'ALL' && r.mode !== modeFilter) continue;
+        const key = `${r.src}->${r.tgt} (${r.mode})`;
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(r);
+      }
+      for (const arr of map.values()) arr.sort((a,b)=>a.amount-b.amount);
+      return map;
+    }
+    function makeChart(container, label, series) {
+      const c = document.createElement('canvas');
+      container.appendChild(c);
+      new Chart(c.getContext('2d'), {
+        type: 'line',
+        data: {
+          labels: series.map(r => r.amount),
+          datasets: [{ label, data: series.map(r => r.fee_bps_vs_mid), fill: false, tension: 0.1 }]
+        },
+        options: {
+          plugins: { legend: { display: true }},
+          scales: {
+            x: { title: { display: true, text: 'Source Amount' }},
+            y: { title: { display: true, text: 'Fee (bps) vs Mid' }}
+          }
+        }
+      });
+    }
+    async function render(mode='ALL') {
+      const chartsDiv = document.getElementById('charts');
+      chartsDiv.innerHTML = '';
+      const rows = await loadRows();
+      const groups = group(rows, mode);
+      for (const [label, series] of groups.entries()) {
+        const card = document.createElement('div'); card.className='card';
+        const h = document.createElement('h3'); h.textContent = label; card.appendChild(h);
+        chartsDiv.appendChild(card);
+        makeChart(card, label, series);
+      }
+    }
+    document.getElementById('mode').addEventListener('change', e => render(e.target.value));
+    render();
+  </script>
+</body>
+</html>
