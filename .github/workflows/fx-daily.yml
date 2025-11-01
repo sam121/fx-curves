@@ -2,10 +2,10 @@ name: Fetch FX daily
 
 on:
   push:
-    branches: [main]
+    branches: [ main ]
   workflow_dispatch:
   schedule:
-    - cron: "7 2 * * *"
+    - cron: '7 2 * * *'
 
 permissions:
   contents: write
@@ -20,23 +20,35 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      - name: Debug token length (masked)
-        run: echo "WISE_TOKEN length: ${#WISE_TOKEN}"
+      - name: Debug token presence and length (masked)
+        shell: bash
         env:
           WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
+        run: |
+          if [[ -n "$WISE_TOKEN" ]]; then
+            echo "WISE_TOKEN present: yes"
+            echo "WISE_TOKEN length: ${#WISE_TOKEN}"
+          else
+            echo "WISE_TOKEN present: no"
+          fi
 
       - name: Fetch latest FX data
+        shell: bash
         env:
           WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
-          PROFILE_ID: ${{ vars.PROFILE_ID || '14878042' }}
         run: bash scripts/fetch_fx.sh
 
       - name: Show data size and preview
+        shell: bash
         run: |
           ls -l data || true
-          echo "Bytes in data/latest.json: $(wc -c < data/latest.json 2>/dev/null || echo 0)"
-          head -c 400 data/latest.json || true
-          echo
+          if [[ -f data/latest.json ]]; then
+            echo "Bytes in data/latest.json: $(wc -c < data/latest.json)"
+            head -c 400 data/latest.json || true
+            echo
+          else
+            echo "data/latest.json not found"
+          fi
 
       - name: Commit & push data
         run: |
