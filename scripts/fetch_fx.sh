@@ -2,10 +2,9 @@
 set -euo pipefail
 
 : "${WISE_TOKEN:?WISE_TOKEN not set}"
-PROFILE_ID="${PROFILE_ID:-14878042}"
 API="https://api.transferwise.com/v3/quotes"
 
-# Keep it light while debugging; expand later
+# small set for debug
 AMOUNTS=(10 100 1000)
 PAIRS=("USD:EUR" "USD:GBP" "USD:SGD" "GBP:USD")
 
@@ -16,17 +15,20 @@ for pair in "${PAIRS[@]}"; do
   IFS=":" read -r SRC TGT <<< "$pair"
   for amt in "${AMOUNTS[@]}"; do
     for MODE in BALANCE BANK_TRANSFER; do
-      payload=$(jq -nc --argjson profile "$PROFILE_ID" --arg src "$SRC" --arg tgt "$TGT" --argjson a "$amt" --arg payOut "$MODE" \
-        '{profile:$profile, sourceCurrency:$src, targetCurrency:$tgt, sourceAmount:$a, payOut:$payOut}')
+      # NOTE: no 'profile' field; let Wise default to the token’s default profile
+      payload=$(jq -nc --arg src "$SRC" --arg tgt "$TGT" --argjson a "$amt" --arg payOut "$MODE" \
+        '{sourceCurrency:$src, targetCurrency:$tgt, sourceAmount:$a, payOut:$payOut}')
 
-      http=$(curl -fSs -o /tmp/resp.json -w '%{http_code}' -X POST "$API" \
+      # don’t use -f; always capture body + status code
+      CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST "$API" \
         -H "Authorization: Bearer $WISE_TOKEN" \
         -H "Content-Type: application/json" \
         -d "$payload") || true
 
-      if [[ "$http" != 2* ]]; then
-        echo "HTTP $http for $SRC->$TGT $MODE $amt; body:" >&2
-        sed -n '1,200p' /tmp/resp.json >&2
+      if [[ "$CODE" != 2* ]]; then
+        echo "HTTP $CODE for $SRC->$TGT $MODE $amt; first 200 chars of body:" >&2
+        head -c 200 /tmp/resp.json 2>/dev/null || true
+        echo >&2
         continue
       fi
 
@@ -63,8 +65,8 @@ for pair in "${PAIRS[@]}"; do
     done
   done
 done
-echo "]" >> "$tmp"
 
+echo "]" >> "$tmp"
 mkdir -p data
 mv "$tmp" data/latest.json
 
