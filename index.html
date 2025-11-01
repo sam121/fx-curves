@@ -33,7 +33,7 @@
 
   <script>
     async function loadRows() {
-      const res = await fetch('../data/latest.json', { cache: 'no-store' });
+      const res = await fetch('./data/latest.json', { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to fetch data');
       return res.json();
     }
