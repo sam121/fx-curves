@@ -1,9 +1,11 @@
 name: Fetch FX daily
 
 on:
+  push:
+    branches: [main]
+  workflow_dispatch:
   schedule:
     - cron: "7 2 * * *"
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -18,7 +20,6 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
-      # DEBUG: confirm the secret is present (masked length only)
       - name: Debug token length (masked)
         run: echo "WISE_TOKEN length: ${#WISE_TOKEN}"
         env:
@@ -30,7 +31,6 @@ jobs:
           PROFILE_ID: ${{ vars.PROFILE_ID || '14878042' }}
         run: bash scripts/fetch_fx.sh
 
-      # DEBUG: show whether data was produced
       - name: Show data size and preview
         run: |
           ls -l data || true
