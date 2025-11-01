@@ -32,6 +32,22 @@ jobs:
             echo "WISE_TOKEN present: no"
           fi
 
+      - name: Auth smoke test (GET /v1/profiles)
+        shell: bash
+        env:
+          WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
+        run: |
+          CODE=$(curl -sS -o /tmp/profiles.json -w '%{http_code}' \
+            -H "Authorization: Bearer $WISE_TOKEN" \
+            https://api.transferwise.com/v1/profiles)
+          echo "GET /v1/profiles HTTP $CODE"
+          if [[ "$CODE" != 2* ]]; then
+            echo "Body (first 400 chars):"
+            head -c 400 /tmp/profiles.json || true
+            exit 2
+          fi
+          echo "Profiles count: $(jq 'length' /tmp/profiles.json)"
+
       - name: Fetch latest FX data
         shell: bash
         env:
