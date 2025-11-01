@@ -1,23 +1,43 @@
 name: Fetch FX daily
+
 on:
   schedule:
-    - cron: "7 2 * * *"   # once per day at 02:07 UTC
-  workflow_dispatch:       # manual trigger
+    - cron: "7 2 * * *"
+  workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   fetch-and-commit:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
+
+      # DEBUG: confirm the secret is present (masked length only)
+      - name: Debug token length (masked)
+        run: echo "WISE_TOKEN length: ${#WISE_TOKEN}"
+        env:
+          WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
+
       - name: Fetch latest FX data
         env:
           WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
           PROFILE_ID: ${{ vars.PROFILE_ID || '14878042' }}
         run: bash scripts/fetch_fx.sh
+
+      # DEBUG: show whether data was produced
+      - name: Show data size and preview
+        run: |
+          ls -l data || true
+          echo "Bytes in data/latest.json: $(wc -c < data/latest.json 2>/dev/null || echo 0)"
+          head -c 400 data/latest.json || true
+          echo
+
       - name: Commit & push data
         run: |
           git config user.name  "github-actions[bot]"
