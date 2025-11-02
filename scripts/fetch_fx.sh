@@ -2,24 +2,25 @@
 set -euo pipefail
 
 : "${WISE_TOKEN:?WISE_TOKEN not set}"
-API="https://api.transferwise.com/v3/quotes"
+API_BASE="${WISE_API_BASE:-https://api.transferwise.com}"
+API="$API_BASE/v3/quotes"
 
-# small set for debug
+# small set while we confirm
 AMOUNTS=(10 100 1000)
 PAIRS=("USD:EUR" "USD:GBP" "USD:SGD" "GBP:USD")
 
 tmp="$(mktemp)"; echo "[" > "$tmp"; first=1
 now_ts="$(date -u +%s)"; rows=0
 
+echo "Using API base: $API_BASE" >&2
+
 for pair in "${PAIRS[@]}"; do
   IFS=":" read -r SRC TGT <<< "$pair"
   for amt in "${AMOUNTS[@]}"; do
     for MODE in BALANCE BANK_TRANSFER; do
-      # NOTE: no 'profile' field; let Wise default to the token’s default profile
       payload=$(jq -nc --arg src "$SRC" --arg tgt "$TGT" --argjson a "$amt" --arg payOut "$MODE" \
         '{sourceCurrency:$src, targetCurrency:$tgt, sourceAmount:$a, payOut:$payOut}')
 
-      # don’t use -f; always capture body + status code
       CODE=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -X POST "$API" \
         -H "Authorization: Bearer $WISE_TOKEN" \
         -H "Content-Type: application/json" \
@@ -27,19 +28,26 @@ for pair in "${PAIRS[@]}"; do
 
       if [[ "$CODE" != 2* ]]; then
         echo "HTTP $CODE for $SRC->$TGT $MODE $amt; first 200 chars of body:" >&2
-        head -c 200 /tmp/resp.json 2>/dev/null || true
-        echo >&2
+        head -c 200 /tmp/resp.json 2>/dev/null || true; echo >&2
         continue
       fi
 
       resp=$(cat /tmp/resp.json)
+
+      # Ensure paymentOptions is an array
+      is_array=$(echo "$resp" | jq -r '(.paymentOptions|type=="array")')
+      [[ "$is_array" != "true" ]] && continue
+
       rate=$(echo "$resp" | jq -r '.rate // empty')
 
-      # Fallbacks: BALANCE+MODE → any BALANCE → any option (cheapest)
+      # Safely pick an option (no boolean-and misuse)
       opt=$(echo "$resp" | jq -c --arg m "$MODE" '
-        ( [ .paymentOptions[]? | select(.payIn=="BALANCE" and .payOut==$m) ] | (length>0 and (min_by(.fee.total))) ) //
-        ( [ .paymentOptions[]? | select(.payIn=="BALANCE") ] | (length>0 and (min_by(.fee.total))) ) //
-        ( [ .paymentOptions[]? ] | (length>0 and (min_by(.fee.total))) ) // empty
+        ( [ .paymentOptions[]? | select(.payIn=="BALANCE" and .payOut==$m) ]
+          | if length>0 then min_by(.fee.total) else empty end ) //
+        ( [ .paymentOptions[]? | select(.payIn=="BALANCE") ]
+          | if length>0 then min_by(.fee.total) else empty end ) //
+        ( [ .paymentOptions[]? ]
+          | if length>0 then min_by(.fee.total) else empty end ) // empty
       ')
 
       [[ -z "${rate:-}" || -z "${opt:-}" ]] && continue
