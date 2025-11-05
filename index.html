@@ -9,12 +9,12 @@
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}
     h1{font-size:44px;margin:0 0 8px}
     .muted{color:#666;margin:0 0 16px}
-    .controls{margin:8px 0 16px}
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+    .controls{display:flex;gap:12px;align-items:center;margin:8px 0 16px;flex-wrap:wrap}
     .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
     .title{font-weight:800;font-size:26px;letter-spacing:.2px;margin:4px 0 12px}
-    canvas{width:100% !important;height:380px !important}
-    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+    canvas{width:100% !important;height:420px !important}
+    button.swap{padding:6px 10px;border:1px solid #ddd;border-radius:10px;background:#fafafa;cursor:pointer}
+    select{padding:6px 8px;border:1px solid #ddd;border-radius:10px;background:#fff}
   </style>
 </head>
 <body>
@@ -22,15 +22,28 @@
   <p class="muted">Daily Wise quotes. Y-axis is fee in <b>bps vs mid outcome</b>. X-axis is source amount.</p>
 
   <div class="controls">
-    <label for="mode">Mode:&nbsp;</label>
+    <label>From:</label>
+    <select id="from"></select>
+    <button id="swap" class="swap" title="Swap">⇆</button>
+    <label>To:</label>
+    <select id="to"></select>
+
+    <span style="width:24px"></span>
+
+    <label>Mode:</label>
     <select id="mode">
-      <option value="ALL">ALL</option>
       <option value="BALANCE" selected>BALANCE</option>
+      <option value="ALL">ALL</option>
       <option value="BANK_TRANSFER">BANK_TRANSFER</option>
     </select>
+
+    <span id="badge" class="muted"></span>
   </div>
 
-  <div id="grid" class="grid"></div>
+  <div class="card">
+    <div id="title" class="title"></div>
+    <canvas id="chart"></canvas>
+  </div>
 
   <script>
     const fmtK = n => {
@@ -47,88 +60,118 @@
       return res.json();
     }
 
-    function groupBy(arr, keyFn){
-      const m=new Map();
-      for (const it of arr){ const k=keyFn(it); if(!m.has(k)) m.set(k,[]); m.get(k).push(it); }
-      return m;
+    const yVal = d => {
+      const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
+      const v = Number(y);
+      return Number.isFinite(v) ? v : null;
+    };
+    const xVal = d => {
+      const x = d.amount ?? d.sourceAmount ?? d.x;
+      const v = Number(x);
+      return Number.isFinite(v) ? v : null;
+    };
+
+    function uniqueSortedCurrencies(rows){
+      const s = new Set();
+      for (const r of rows){
+        s.add(String(r.src ?? r.sourceCurrency));
+        s.add(String(r.tgt ?? r.targetCurrency));
+      }
+      return Array.from(s).filter(Boolean).sort();
     }
 
-    function buildCharts(rows, modeSel){
-      const grid = document.getElementById('grid');
-      grid.innerHTML = '';
+    function filterPair(rows, from, to, mode){
+      return rows.filter(r => {
+        const src = r.src ?? r.sourceCurrency;
+        const tgt = r.tgt ?? r.targetCurrency;
+        const m = r.mode ?? r.payOut;
+        if (src !== from || tgt !== to) return false;
+        if (mode === 'ALL') return true;
+        return (m === mode);
+      });
+    }
 
-      // Tolerant field selectors
-      const getY = d => {
-        const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
-        const v = Number(y);
-        return Number.isFinite(v) ? v : null;
-      };
-      const getX = d => {
-        const x = d.amount ?? d.sourceAmount ?? d.x;
-        const v = Number(x);
-        return Number.isFinite(v) ? v : null;
-      };
-
-      const usable = rows.filter(r => modeSel === 'ALL' ? true : ((r.mode ?? r.payOut) === modeSel));
-
-      const byPair = groupBy(
-        usable,
-        d => (d.pair ?? `${d.src ?? d.sourceCurrency}->${d.tgt ?? d.targetCurrency}`)
-      );
-
-      for (const [pair, items] of byPair.entries()){
-        const points = items
-          .map(d => ({ x: getX(d), y: getY(d) }))
-          .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-          .sort((a,b) => a.x - b.x);
-
-        if (!points.length) continue;
-
-        // Auto Y-domain based on data (adds headroom, fixes stuck 0–1 axis)
-        const yMaxRaw = Math.max(...points.map(p => p.y));
-        let yMax = Math.ceil(yMaxRaw / 5) * 5; // nearest 5 bps
-        if (yMax < 1) yMax = 1;
-
-        const card = document.createElement('div'); card.className='card';
-        const h = document.createElement('div'); h.className='title';
-        const modeLabel = (modeSel === 'ALL') ? (items[0].mode ?? items[0].payOut ?? '') : modeSel;
-        h.textContent = `${pair} (${modeLabel || 'BALANCE'})`;
-        const canvas = document.createElement('canvas');
-
-        card.appendChild(h); card.appendChild(canvas); grid.appendChild(card);
-
-        new Chart(canvas.getContext('2d'), {
-          type: 'line',
-          data: { datasets: [{ label: `${pair} (${modeLabel || 'BALANCE'})`, data: points, borderWidth:2, pointRadius:3, tension:0.2 }]},
-          options: {
-            responsive:true, maintainAspectRatio:false,
-            plugins:{ legend:{position:'top'},
-              tooltip:{ callbacks:{ label: ctx => ` ${pair}: amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps` } } },
-            scales:{
-              x:{ type:'logarithmic',
-                  min: Math.min(...points.map(p=>p.x)),
-                  max: Math.max(...points.map(p=>p.x)),
-                  ticks:{ callback:v=>fmtK(v) },
-                  title:{ display:true, text:'Source Amount' } },
-              y:{ beginAtZero:true, min:0, max:yMax, title:{ display:true, text:'Fee (bps) vs Mid' } }
-            }
-          }
-        });
-      }
-
-      if (!grid.children.length){
-        const note=document.createElement('div'); note.className='muted'; note.textContent='No data for this mode.'; grid.appendChild(note);
-      }
+    function niceYmax(points){
+      if (!points.length) return 1;
+      const max = Math.max(...points.map(p => p.y));
+      let yMax = Math.ceil(max / 5) * 5;
+      if (yMax < 1) yMax = 1;
+      return yMax;
     }
 
     (async function init(){
       const rows = await loadData();
+
+      // Populate currency dropdowns
+      const curList = uniqueSortedCurrencies(rows);
+      const fromEl = document.getElementById('from');
+      const toEl = document.getElementById('to');
       const modeEl = document.getElementById('mode');
-      const render = () => buildCharts(rows, modeEl.value);
+      const swapBtn = document.getElementById('swap');
+      const titleEl = document.getElementById('title');
+      const badgeEl = document.getElementById('badge');
+
+      for (const c of curList){
+        const o1 = document.createElement('option'); o1.value = o1.textContent = c; fromEl.appendChild(o1);
+        const o2 = document.createElement('option'); o2.value = o2.textContent = c; toEl.appendChild(o2);
+      }
+      // Defaults: GBP -> USD
+      if (curList.includes('GBP')) fromEl.value = 'GBP';
+      if (curList.includes('USD')) toEl.value = 'USD';
+      if (fromEl.value === toEl.value) toEl.value = curList.find(c => c !== fromEl.value) || curList[0];
+
+      const ctx = document.getElementById('chart').getContext('2d');
+      let chart = null;
+
+      function render(){
+        const from = fromEl.value;
+        const to = toEl.value;
+        const mode = modeEl.value;
+
+        const items = filterPair(rows, from, to, mode);
+        const points = items
+          .map(d => ({ x: xVal(d), y: yVal(d) }))
+          .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+          .sort((a,b) => a.x - b.x);
+
+        const yMax = niceYmax(points);
+        titleEl.textContent = `${from}->${to} (${mode})`;
+        badgeEl.textContent = `Points: ${points.length}`;
+
+        const data = { datasets: [{ label: `${from}->${to} (${mode})`, data: points, borderWidth:2, pointRadius:3, tension:0.2 }]};
+        const options = {
+          responsive:true, maintainAspectRatio:false,
+          plugins:{ legend:{position:'top'},
+            tooltip:{ callbacks:{ label: ctx => ` amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps` } } },
+          scales:{
+            x:{ type:'logarithmic',
+                min: points.length ? Math.min(...points.map(p=>p.x)) : 10,
+                max: points.length ? Math.max(...points.map(p=>p.x)) : 1_000_000,
+                ticks:{ callback:v=>fmtK(v) },
+                title:{ display:true, text:'Source Amount' } },
+            y:{ beginAtZero:true, min:0, max:yMax, title:{ display:true, text:'Fee (bps) vs Mid' } }
+          }
+        };
+
+        if (!chart){
+          chart = new Chart(ctx, { type:'line', data, options });
+        } else {
+          chart.data = data;
+          chart.options = options;
+          chart.update();
+        }
+      }
+
+      fromEl.addEventListener('change', render);
+      toEl.addEventListener('change', render);
       modeEl.addEventListener('change', render);
+      swapBtn.addEventListener('click', () => {
+        const a = fromEl.value; fromEl.value = toEl.value; toEl.value = a; render();
+      });
+
       render();
     })().catch(err => {
-      document.getElementById('grid').textContent = 'Failed to load charts: ' + err.message;
+      document.querySelector('.card').innerHTML = '<div class="muted">Failed to load charts: ' + err.message + '</div>';
       console.error(err);
     });
   </script>
