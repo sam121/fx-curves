@@ -1,85 +1,136 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>FX Cost Curves</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <title>FX Cost Curves</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 16px; }
-    .grid { display: grid; gap: 24px; grid-template-columns: 1fr; }
-    @media (min-width: 1100px) { .grid { grid-template-columns: 1fr 1fr; } }
-    .card { padding: 16px; border: 1px solid #eee; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.05); }
-    .muted { color:#666; font-size: 14px; }
-    .toolbar { margin: 8px 0 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-    select, label { font-size:14px; }
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}
+    h1{font-size:44px;margin:0 0 8px}
+    .muted{color:#666;margin:0 0 16px}
+    .controls{margin:8px 0 16px}
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+    .title{font-weight:800;font-size:26px;letter-spacing:.2px;margin:4px 0 12px}
+    canvas{width:100% !important;height:380px !important}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <h1>FX Cost Curves</h1>
   <p class="muted">Daily Wise quotes. Y-axis is fee in <b>bps vs mid outcome</b>. X-axis is source amount.</p>
 
-  <div class="toolbar">
-    <label>Mode:
-      <select id="mode">
-        <option value="ALL">ALL</option>
-        <option>BALANCE</option>
-        <option>BANK_TRANSFER</option>
-      </select>
-    </label>
+  <div class="controls">
+    <label for="mode">Mode:&nbsp;</label>
+    <select id="mode">
+      <option value="ALL">ALL</option>
+      <option value="BALANCE" selected>BALANCE</option>
+      <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+    </select>
   </div>
 
-  <div id="charts" class="grid"></div>
+  <div id="grid" class="grid"></div>
 
   <script>
-    async function loadRows() {
-      const res = await fetch('./data/latest.json', { cache: 'no-store' });
-      if (!res.ok) throw new Error('Failed to fetch data');
+    const fmtK = n => {
+      const x = Number(n);
+      if (!isFinite(x)) return String(n);
+      if (x >= 1_000_000) return (x/1_000_000).toFixed(0) + "M";
+      if (x >= 1000) return (x/1000).toFixed(0) + "k";
+      return String(x);
+    };
+
+    async function loadData() {
+      const res = await fetch('data/latest.json?nocache=' + Date.now());
+      if (!res.ok) throw new Error('Failed to load data/latest.json');
       return res.json();
     }
-    function group(rows, modeFilter) {
-      const map = new Map();
-      for (const r of rows) {
-        if (modeFilter !== 'ALL' && r.mode !== modeFilter) continue;
-        const key = `${r.src}->${r.tgt} (${r.mode})`;
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(r);
-      }
-      for (const arr of map.values()) arr.sort((a,b)=>a.amount-b.amount);
-      return map;
+
+    function groupBy(arr, keyFn){
+      const m=new Map();
+      for (const it of arr){ const k=keyFn(it); if(!m.has(k)) m.set(k,[]); m.get(k).push(it); }
+      return m;
     }
-    function makeChart(container, label, series) {
-      const c = document.createElement('canvas');
-      container.appendChild(c);
-      new Chart(c.getContext('2d'), {
-        type: 'line',
-        data: {
-          labels: series.map(r => r.amount),
-          datasets: [{ label, data: series.map(r => r.fee_bps_vs_mid), fill: false, tension: 0.1 }]
-        },
-        options: {
-          plugins: { legend: { display: true }},
-          scales: {
-            x: { title: { display: true, text: 'Source Amount' }},
-            y: { title: { display: true, text: 'Fee (bps) vs Mid' }}
-          }
-        }
-      });
-    }
-    async function render(mode='ALL') {
-      const chartsDiv = document.getElementById('charts');
-      chartsDiv.innerHTML = '';
-      const rows = await loadRows();
-      const groups = group(rows, mode);
-      for (const [label, series] of groups.entries()) {
+
+    function buildCharts(rows, modeSel){
+      const grid = document.getElementById('grid');
+      grid.innerHTML = '';
+
+      // Tolerant field selectors
+      const getY = d => {
+        const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
+        const v = Number(y);
+        return Number.isFinite(v) ? v : null;
+      };
+      const getX = d => {
+        const x = d.amount ?? d.sourceAmount ?? d.x;
+        const v = Number(x);
+        return Number.isFinite(v) ? v : null;
+      };
+
+      const usable = rows.filter(r => modeSel === 'ALL' ? true : ((r.mode ?? r.payOut) === modeSel));
+
+      const byPair = groupBy(
+        usable,
+        d => (d.pair ?? `${d.src ?? d.sourceCurrency}->${d.tgt ?? d.targetCurrency}`)
+      );
+
+      for (const [pair, items] of byPair.entries()){
+        const points = items
+          .map(d => ({ x: getX(d), y: getY(d) }))
+          .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
+          .sort((a,b) => a.x - b.x);
+
+        if (!points.length) continue;
+
+        // Auto Y-domain based on data (adds headroom, fixes stuck 0–1 axis)
+        const yMaxRaw = Math.max(...points.map(p => p.y));
+        let yMax = Math.ceil(yMaxRaw / 5) * 5; // nearest 5 bps
+        if (yMax < 1) yMax = 1;
+
         const card = document.createElement('div'); card.className='card';
-        const h = document.createElement('h3'); h.textContent = label; card.appendChild(h);
-        chartsDiv.appendChild(card);
-        makeChart(card, label, series);
+        const h = document.createElement('div'); h.className='title';
+        const modeLabel = (modeSel === 'ALL') ? (items[0].mode ?? items[0].payOut ?? '') : modeSel;
+        h.textContent = `${pair} (${modeLabel || 'BALANCE'})`;
+        const canvas = document.createElement('canvas');
+
+        card.appendChild(h); card.appendChild(canvas); grid.appendChild(card);
+
+        new Chart(canvas.getContext('2d'), {
+          type: 'line',
+          data: { datasets: [{ label: `${pair} (${modeLabel || 'BALANCE'})`, data: points, borderWidth:2, pointRadius:3, tension:0.2 }]},
+          options: {
+            responsive:true, maintainAspectRatio:false,
+            plugins:{ legend:{position:'top'},
+              tooltip:{ callbacks:{ label: ctx => ` ${pair}: amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps` } } },
+            scales:{
+              x:{ type:'logarithmic',
+                  min: Math.min(...points.map(p=>p.x)),
+                  max: Math.max(...points.map(p=>p.x)),
+                  ticks:{ callback:v=>fmtK(v) },
+                  title:{ display:true, text:'Source Amount' } },
+              y:{ beginAtZero:true, min:0, max:yMax, title:{ display:true, text:'Fee (bps) vs Mid' } }
+            }
+          }
+        });
+      }
+
+      if (!grid.children.length){
+        const note=document.createElement('div'); note.className='muted'; note.textContent='No data for this mode.'; grid.appendChild(note);
       }
     }
-    document.getElementById('mode').addEventListener('change', e => render(e.target.value));
-    render();
+
+    (async function init(){
+      const rows = await loadData();
+      const modeEl = document.getElementById('mode');
+      const render = () => buildCharts(rows, modeEl.value);
+      modeEl.addEventListener('change', render);
+      render();
+    })().catch(err => {
+      document.getElementById('grid').textContent = 'Failed to load charts: ' + err.message;
+      console.error(err);
+    });
   </script>
 </body>
 </html>
