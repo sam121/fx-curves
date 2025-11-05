@@ -8,15 +8,12 @@ set -o pipefail
 API_BASE="${WISE_API_BASE:-https://api.transferwise.com}"
 : "${WISE_TOKEN?Need env WISE_TOKEN set (GitHub Secret WISE_TOKEN)}"
 
-# 4 pairs × 6 amounts = 24 rows
 PAIRS=("GBP:USD" "USD:JPY" "SGD:USD" "EUR:USD")
 AMOUNTS=(10 100 1000 10000 100000 1000000)
 
-# Where the workflow writes
 OUTDIR="data"
 OUTFILE="${OUTDIR}/latest.json"
 
-# Where the website reads
 SITE_OUTDIR="docs/data"
 SITE_OUTFILE="${SITE_OUTDIR}/latest.json"
 
@@ -59,13 +56,11 @@ for pair in "${PAIRS[@]}"; do
 
     resp="$(curl -sS -X POST "${API_BASE}/v3/quotes" "${CURL_AUTH[@]}" -d "$body" || true)"
 
-    # Record explicit error row if the API errored
     if [[ -z "$resp" ]] || echo "$resp" | jq -e '.errors? // empty' >/dev/null 2>&1; then
-      echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"BALANCE\",\"targetAmount\":null,\"fee_total\":null,\"mode\":\"BALANCE\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"status\":\"error\"}" >> "$TMPFILE"
+      echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"BALANCE\",\"targetAmount\":null,\"fee_total\":null,\"mode\":\"BALANCE\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"bps\":null,\"bps_vs_mid\":null,\"y\":null,\"x\":${amt},\"pair\":\"${SRC}->${TGT}\",\"status\":\"error\"}" >> "$TMPFILE"
       continue
     fi
 
-    # Build a row with numeric types (cast strings -> numbers safely)
     row=$(echo "$resp" | jq -c \
       --arg ts "$ts_iso" --arg src "$SRC" --arg tgt "$TGT" --argjson amt "$amt" '
         (try (.rate|tonumber) catch null) as $rate
@@ -76,7 +71,13 @@ for pair in "${PAIRS[@]}"; do
           ) as $opt
         | (try ($opt.targetAmount // $opt.target.amount | tonumber) catch null) as $tgtAmt
         | (try ($opt.fee.total | tonumber) catch null) as $feeTot
+        | ( ($rate // 0) * $amt ) as $mid
+        | ( if (($rate // 0) > 0 and ($tgtAmt // 0) > 0)
+            then (1 - ($tgtAmt / ($mid))) * 10000
+            else null end
+          ) as $bps
         | {
+            # core fields
             ts: $ts,
             sourceCurrency: $src,
             targetCurrency: $tgt,
@@ -86,19 +87,20 @@ for pair in "${PAIRS[@]}"; do
             payOut: ($opt.payOut // "BALANCE"),
             targetAmount: $tgtAmt,
             fee_total:    $feeTot,
-            # extras for the website
+            status: ( if ($rate != null and $tgtAmt != null) then "ok" else "incomplete" end ),
+
+            # website helpers / aliases
             mode: ($opt.payOut // "BALANCE"),
             src:  $src,
             tgt:  $tgt,
             amount: $amt,
-            midTarget: ( ($rate // 0) * $amt ),
-            fee_bps: (
-              if (($rate // 0) > 0 and ($tgtAmt // 0) > 0)
-              then (1 - ($tgtAmt / (($rate) * $amt))) * 10000
-              else null
-              end
-            ),
-            status: ( if ($rate != null and $tgtAmt != null) then "ok" else "incomplete" end )
+            midTarget: $mid,
+            fee_bps: $bps,
+            bps: $bps,
+            bps_vs_mid: $bps,
+            y: $bps,
+            x: $amt,
+            pair: ($src + "->" + $tgt)
           }')
 
     echo "$row" >> "$TMPFILE"
@@ -115,14 +117,12 @@ if [[ ! -s "$OUTFILE" ]]; then
 fi
 
 rows_total="$(jq 'length' "$OUTFILE" 2>/dev/null || echo 0)"
-rows_valid="$(jq '[.[] | select(.fee_bps != null)] | length' "$OUTFILE" 2>/dev/null || echo 0)"
-echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} valid fee_bps points)"
+rows_valid="$(jq '[.[] | select(.y != null)] | length' "$OUTFILE" 2>/dev/null || echo 0)"
+echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} valid points)"
 
-# Copy to site dir for GitHub Pages
 cp "$OUTFILE" "$SITE_OUTFILE"
 echo "Copied $OUTFILE -> $SITE_OUTFILE"
 
-# Warn if low, but do NOT fail the job
 MIN_ROWS=${MIN_ROWS:-10}
 if (( rows_total < MIN_ROWS )); then
   echo "Warning: Only ${rows_total} rows (< ${MIN_ROWS}). Continuing so downstream steps can run."
