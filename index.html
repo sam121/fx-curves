@@ -91,12 +91,27 @@
       });
     }
 
-    function niceYmax(points){
-      if (!points.length) return 1;
-      const max = Math.max(...points.map(p => p.y));
-      let yMax = Math.ceil(max / 5) * 5;
-      if (yMax < 1) yMax = 1;
-      return yMax;
+    // --- NEW: smart y-domain with headroom/tailroom ---
+    function yDomain(points){
+      if (!points.length) return {min:0, max:1};
+      const ys = points.map(p => p.y);
+      const yMinRaw = Math.min(...ys);
+      const yMaxRaw = Math.max(...ys);
+      const span = yMaxRaw - yMinRaw;
+
+      // 15–20% padding, at least 2 bps; if span is very tight, ensure ~5–8 bps total padding
+      let pad = Math.max(span * 0.18, 2);
+      if (span < 8) pad = Math.max(pad, 4);
+
+      let yMin = Math.max(0, yMinRaw - pad);
+      let yMax = yMaxRaw + pad;
+
+      // Round to nice 5-bps ticks
+      yMin = Math.floor(yMin / 5) * 5;
+      yMax = Math.ceil(yMax / 5) * 5;
+      if (yMax <= yMin) yMax = yMin + 5;
+
+      return {min: yMin, max: yMax};
     }
 
     (async function init(){
@@ -134,27 +149,55 @@
           .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
           .sort((a,b) => a.x - b.x);
 
-        const yMax = niceYmax(points);
+        const {min: yMin, max: yMax} = yDomain(points);
         titleEl.textContent = `${from}->${to} (${mode})`;
         badgeEl.textContent = `Points: ${points.length}`;
 
-        const data = { datasets: [{ label: `${from}->${to} (${mode})`, data: points, borderWidth:2, pointRadius:3, tension:0.2 }]};
+        const data = {
+          datasets: [{
+            label: `${from}->${to} (${mode})`,
+            data: points,
+            borderWidth: 2,
+            pointRadius: 3,
+            tension: 0.2,
+            spanGaps: true
+          }]
+        };
+
         const options = {
-          responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{position:'top'},
-            tooltip:{ callbacks:{ label: ctx => ` amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps` } } },
-          scales:{
-            x:{ type:'logarithmic',
-                min: points.length ? Math.min(...points.map(p=>p.x)) : 10,
-                max: points.length ? Math.max(...points.map(p=>p.x)) : 1_000_000,
-                ticks:{ callback:v=>fmtK(v) },
-                title:{ display:true, text:'Source Amount' } },
-            y:{ beginAtZero:true, min:0, max:yMax, title:{ display:true, text:'Fee (bps) vs Mid' } }
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: ctx => ` amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps`
+              }
+            }
+          },
+          scales: {
+            x: {
+              type: 'logarithmic',
+              min: points.length ? Math.min(...points.map(p=>p.x)) : 10,
+              max: points.length ? Math.max(...points.map(p=>p.x)) : 1_000_000,
+              ticks: { callback: v => fmtK(v) },
+              title: { display: true, text: 'Source Amount' }
+            },
+            y: {
+              // No beginAtZero; use smart domain so the series isn’t stuck at the top
+              min: yMin,
+              max: yMax,
+              ticks: {
+                callback: v => Number(v).toFixed(0) // whole-bps ticks
+              },
+              title: { display: true, text: 'Fee (bps) vs Mid' }
+            }
           }
         };
 
         if (!chart){
-          chart = new Chart(ctx, { type:'line', data, options });
+          chart = new Chart(ctx, { type: 'line', data, options });
         } else {
           chart.data = data;
           chart.options = options;
@@ -165,13 +208,14 @@
       fromEl.addEventListener('change', render);
       toEl.addEventListener('change', render);
       modeEl.addEventListener('change', render);
-      swapBtn.addEventListener('click', () => {
+      document.getElementById('swap').addEventListener('click', () => {
         const a = fromEl.value; fromEl.value = toEl.value; toEl.value = a; render();
       });
 
       render();
     })().catch(err => {
-      document.querySelector('.card').innerHTML = '<div class="muted">Failed to load charts: ' + err.message + '</div>';
+      document.querySelector('.card').innerHTML =
+        '<div class="muted">Failed to load charts: ' + err.message + '</div>';
       console.error(err);
     });
   </script>
