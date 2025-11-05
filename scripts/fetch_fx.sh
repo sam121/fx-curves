@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/fetch_fx.sh
-# Fetch Wise FX quotes for G20 currencies (both directions) and publish JSON for the website.
+# Fetch Wise FX quotes for (G20 + SGD) currencies in both directions and publish JSON.
 
 set -o pipefail
 
@@ -8,15 +8,21 @@ set -o pipefail
 API_BASE="${WISE_API_BASE:-https://api.transferwise.com}"
 : "${WISE_TOKEN?Need env WISE_TOKEN set (GitHub Secret WISE_TOKEN)}"
 
-# G20 currency codes (EU is EUR). Override with CURRENCIES="USD,GBP,..." if you want fewer.
-CURRENCIES_CSV="${CURRENCIES:-AUD,ARS,BRL,CAD,CNY,EUR,INR,IDR,JPY,MXN,RUB,SAR,ZAR,KRW,TRY,GBP,USD}"
+# G20 currencies (EU=EUR) + SGD
+# Override with env: CURRENCIES="USD,GBP,..." if you want fewer.
+CURRENCIES_CSV="${CURRENCIES:-AUD,ARS,BRL,CAD,CNY,EUR,INR,IDR,JPY,MXN,RUB,SAR,ZAR,KRW,TRY,GBP,USD,SGD}"
 IFS=',' read -r -a CCYS <<< "$CURRENCIES_CSV"
 
-# Amount grid
-AMOUNTS=(10 100 1000 10000 100000 1000000)
+# Amount grid (override with AMOUNTS env if you like)
+AMOUNTS_CSV="${AMOUNTS:-10,100,1000,10000,100000,1000000}"
+IFS=',' read -r -a AMOUNTS <<< "$AMOUNTS_CSV"
 
-# Throttle between requests (ms). Increase if you hit API rate limits.
+# Modes to quote (payIn is fixed at BALANCE for fair comparison)
+MODES=("BALANCE" "BANK_TRANSFER")
+
+# Gentle throttle to avoid rate limits (ms); override with REQ_DELAY_MS
 REQ_DELAY_MS="${REQ_DELAY_MS:-120}"
+sleep_secs=$(awk -v ms="$REQ_DELAY_MS" 'BEGIN {printf "%.3f", ms/1000.0}')
 
 OUTDIR="data"
 OUTFILE="${OUTDIR}/latest.json"
@@ -27,7 +33,8 @@ mkdir -p "$OUTDIR"
 
 echo "Using API base: ${API_BASE}"
 echo "Currencies: ${CURRENCIES_CSV}"
-echo "Amounts: ${AMOUNTS[*]}"
+echo "Amounts: ${AMOUNTS_CSV}"
+echo "Modes: ${MODES[*]}"
 echo "Throttle: ${REQ_DELAY_MS} ms/request"
 
 # ---------- Headers ----------
@@ -55,77 +62,95 @@ for a in "${CCYS[@]}"; do
     PAIRS+=("$a:$b")
   done
 done
-echo "Total pairs to try: ${#PAIRS[@]}  (currencies=${#CCYS[@]})"
-sleep_secs=$(awk -v ms="$REQ_DELAY_MS" 'BEGIN {printf "%.3f", ms/1000.0}')
+echo "Total pairs: ${#PAIRS[@]}  (currencies=${#CCYS[@]})"
 
 # ---------- Fetch ----------
 ts_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-total=0; ok_points=0
 
 for pair in "${PAIRS[@]}"; do
   IFS=: read -r SRC TGT <<< "$pair"
+
   for amt in "${AMOUNTS[@]}"; do
-    total=$((total+1))
-    body=$(jq -n \
-      --arg src "$SRC" \
-      --arg tgt "$TGT" \
-      --argjson amt "$amt" \
-      --argjson profile "$PROFILE_ID" \
-      '{profile: $profile, sourceCurrency: $src, targetCurrency: $tgt,
-        sourceAmount: $amt, payOut: "BALANCE", preferredPayIn: "BALANCE"}')
+    for MODE in "${MODES[@]}"; do
+      body=$(jq -n \
+        --arg src "$SRC" \
+        --arg tgt "$TGT" \
+        --argjson amt "$amt" \
+        --argjson profile "$PROFILE_ID" \
+        --arg mode "$MODE" \
+        '{profile: $profile, sourceCurrency: $src, targetCurrency: $tgt,
+          sourceAmount: $amt, payOut: $mode, preferredPayIn: "BALANCE"}')
 
-    resp="$(curl -sS -X POST "${API_BASE}/v3/quotes" "${CURL_AUTH[@]}" -d "$body" || true)"
+      resp="$(curl -sS -X POST "${API_BASE}/v3/quotes" "${CURL_AUTH[@]}" -d "$body" || true)"
+      sleep "$sleep_secs"
 
-    # Optional gentle throttle
-    sleep "$sleep_secs"
+      # If API error, record a stub row
+      if [[ -z "$resp" ]] || echo "$resp" | jq -e '.errors? // empty' >/dev/null 2>&1; then
+        echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"${MODE}\",\"targetAmount\":null,\"fee_total\":null,\"status\":\"error\",\"mode\":\"${MODE}\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"fee_bps_vs_mid\":null,\"rounding_bps\":null,\"pair\":\"${SRC}->${TGT}\"}" >> "$TMPFILE"
+        continue
+      fi
 
-    if [[ -z "$resp" ]] || echo "$resp" | jq -e '.errors? // empty' >/dev/null 2>&1; then
-      echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"BALANCE\",\"targetAmount\":null,\"fee_total\":null,\"mode\":\"BALANCE\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"pair\":\"${SRC}->${TGT}\",\"status\":\"error\"}" >> "$TMPFILE"
-      continue
-    fi
+      # Build numeric row; compute fee_bps from the fee (robust to rounding)
+      row=$(echo "$resp" | jq -c \
+        --arg ts "$ts_iso" --arg src "$SRC" --arg tgt "$TGT" --argjson amt "$amt" --arg mode "$MODE" '
+          (try (.rate|tonumber) catch null) as $rate
+          | (
+              (.paymentOptions // [])
+              | map(select(.payIn=="BALANCE" and .payOut==$mode))
+              | (.[0] // {})
+            ) as $opt
+          | (try ($opt.targetAmount // $opt.target.amount | tonumber) catch null) as $tgtAmt
+          | (try ($opt.fee.total | tonumber) catch null) as $feeTot
 
-    row=$(echo "$resp" | jq -c \
-      --arg ts "$ts_iso" --arg src "$SRC" --arg tgt "$TGT" --argjson amt "$amt" '
-        (try (.rate|tonumber) catch null) as $rate
-        | (
-            (.paymentOptions // [])
-            | map(select(.payIn=="BALANCE" and .payOut=="BALANCE"))
-            | (.[0] // {})
-          ) as $opt
-        | (try ($opt.targetAmount // $opt.target.amount | tonumber) catch null) as $tgtAmt
-        | (try ($opt.fee.total | tonumber) catch null) as $feeTot
-        | ( ($rate // 0) * $amt ) as $mid
-        | ( if (($rate // 0) > 0 and ($tgtAmt // 0) > 0)
-            then (1 - ($tgtAmt / ($mid))) * 10000
-            else null end
-          ) as $bps
-        | {
-            ts: $ts,
-            sourceCurrency: $src,
-            targetCurrency: $tgt,
-            sourceAmount: $amt,
-            rate: $rate,
-            payIn:  ($opt.payIn  // "BALANCE"),
-            payOut: ($opt.payOut // "BALANCE"),
-            targetAmount: $tgtAmt,
-            fee_total:    $feeTot,
-            status: ( if ($rate != null and $tgtAmt != null) then "ok" else "incomplete" end ),
+          # Mid outcome and an effective (unrounded) target based on fee
+          | ( ($rate // 0) * $amt ) as $mid
+          | ( ($amt - ($feeTot // 0)) * ($rate // 0) ) as $effTarget
 
-            # website helpers
-            mode: ($opt.payOut // "BALANCE"),
-            src:  $src,
-            tgt:  $tgt,
-            amount: $amt,
-            midTarget: $mid,
-            fee_bps: $bps,
-            pair: ($src + "->" + $tgt)
-          }')
+          # Primary metric (use this for plotting)
+          | ( if $amt > 0  then ($feeTot / $amt) * 10000 else null end ) as $bps_fee
 
-    echo "$row" >> "$TMPFILE"
+          # Diagnostics (optional): fee vs mid recomputed; rounding impact bps
+          | ( if $mid > 0  then (1 - ($effTarget / $mid)) * 10000 else null end ) as $bps_mid
+          | ( if ($mid > 0 and $tgtAmt != null)
+              then ( ($tgtAmt - $effTarget) / $mid ) * 10000
+              else null
+            end ) as $round_bps
+
+          | {
+              ts: $ts,
+              sourceCurrency: $src,
+              targetCurrency: $tgt,
+              sourceAmount: $amt,
+              rate: $rate,
+              payIn:  ($opt.payIn  // "BALANCE"),
+              payOut: ($opt.payOut // $mode),
+              targetAmount: $tgtAmt,
+              fee_total:    $feeTot,
+              status: ( if ($rate != null and $feeTot != null) then "ok" else "incomplete" end ),
+
+              # Website helpers / aliases
+              mode: ($opt.payOut // $mode),
+              src:  $src,
+              tgt:  $tgt,
+              amount: $amt,
+              midTarget: $mid,
+
+              fee_bps: $bps_fee,            # <-- plot this
+              fee_bps_vs_mid: $bps_mid,     # diag
+              rounding_bps: $round_bps,     # diag
+              pair: ($src + "->" + $tgt),
+
+              # convenience for tolerant front-ends
+              x: $amt,
+              y: $bps_fee
+            }')
+
+      echo "$row" >> "$TMPFILE"
+    done
   done
 done
 
-# ---------- Write & publish ----------
+# ---------- Write ----------
 jq -s '.' "$TMPFILE" > "$OUTFILE" 2>/dev/null || true
 rm -f "$TMPFILE"
 
@@ -136,7 +161,5 @@ fi
 
 rows_total="$(jq 'length' "$OUTFILE" 2>/dev/null || echo 0)"
 rows_valid="$(jq '[.[] | select(.fee_bps != null)] | length' "$OUTFILE" 2>/dev/null || echo 0)"
-echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} valid points) from ${#PAIRS[@]} pairs x ${#AMOUNTS[@]} amounts"
-
-# Keep job green unless the file is empty.
+echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} points)"
 exit 0
