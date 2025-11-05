@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/fetch_fx.sh
-# Fetch a small grid of Wise FX quotes and publish JSON for the website.
+# Fetch Wise FX quotes for G20 currencies (both directions) and publish JSON for the website.
 
 set -o pipefail
 
@@ -8,20 +8,27 @@ set -o pipefail
 API_BASE="${WISE_API_BASE:-https://api.transferwise.com}"
 : "${WISE_TOKEN?Need env WISE_TOKEN set (GitHub Secret WISE_TOKEN)}"
 
-PAIRS=("GBP:USD" "USD:JPY" "SGD:USD" "EUR:USD")
+# G20 currency codes (EU is EUR). Override with CURRENCIES="USD,GBP,..." if you want fewer.
+CURRENCIES_CSV="${CURRENCIES:-AUD,ARS,BRL,CAD,CNY,EUR,INR,IDR,JPY,MXN,RUB,SAR,ZAR,KRW,TRY,GBP,USD}"
+IFS=',' read -r -a CCYS <<< "$CURRENCIES_CSV"
+
+# Amount grid
 AMOUNTS=(10 100 1000 10000 100000 1000000)
+
+# Throttle between requests (ms). Increase if you hit API rate limits.
+REQ_DELAY_MS="${REQ_DELAY_MS:-120}"
 
 OUTDIR="data"
 OUTFILE="${OUTDIR}/latest.json"
-
-SITE_OUTDIR="docs/data"
-SITE_OUTFILE="${SITE_OUTDIR}/latest.json"
-
 TMPFILE="$(mktemp)"
-mkdir -p "$OUTDIR" "$SITE_OUTDIR"
+
+mkdir -p "$OUTDIR"
 : > "$TMPFILE"
 
 echo "Using API base: ${API_BASE}"
+echo "Currencies: ${CURRENCIES_CSV}"
+echo "Amounts: ${AMOUNTS[*]}"
+echo "Throttle: ${REQ_DELAY_MS} ms/request"
 
 # ---------- Headers ----------
 CURL_AUTH=(-H "Authorization: Bearer ${WISE_TOKEN}" -H "Content-Type: application/json")
@@ -40,12 +47,25 @@ if [[ -z "$PROFILE_ID" || "$PROFILE_ID" == "null" ]]; then
   exit 1
 fi
 
+# Build all ordered pairs A->B (A!=B)
+declare -a PAIRS=()
+for a in "${CCYS[@]}"; do
+  for b in "${CCYS[@]}"; do
+    [[ "$a" == "$b" ]] && continue
+    PAIRS+=("$a:$b")
+  done
+done
+echo "Total pairs to try: ${#PAIRS[@]}  (currencies=${#CCYS[@]})"
+sleep_secs=$(awk -v ms="$REQ_DELAY_MS" 'BEGIN {printf "%.3f", ms/1000.0}')
+
 # ---------- Fetch ----------
 ts_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+total=0; ok_points=0
 
 for pair in "${PAIRS[@]}"; do
   IFS=: read -r SRC TGT <<< "$pair"
   for amt in "${AMOUNTS[@]}"; do
+    total=$((total+1))
     body=$(jq -n \
       --arg src "$SRC" \
       --arg tgt "$TGT" \
@@ -56,8 +76,11 @@ for pair in "${PAIRS[@]}"; do
 
     resp="$(curl -sS -X POST "${API_BASE}/v3/quotes" "${CURL_AUTH[@]}" -d "$body" || true)"
 
+    # Optional gentle throttle
+    sleep "$sleep_secs"
+
     if [[ -z "$resp" ]] || echo "$resp" | jq -e '.errors? // empty' >/dev/null 2>&1; then
-      echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"BALANCE\",\"targetAmount\":null,\"fee_total\":null,\"mode\":\"BALANCE\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"bps\":null,\"bps_vs_mid\":null,\"y\":null,\"x\":${amt},\"pair\":\"${SRC}->${TGT}\",\"status\":\"error\"}" >> "$TMPFILE"
+      echo "{\"ts\":\"${ts_iso}\",\"sourceCurrency\":\"${SRC}\",\"targetCurrency\":\"${TGT}\",\"sourceAmount\":${amt},\"rate\":null,\"payIn\":\"BALANCE\",\"payOut\":\"BALANCE\",\"targetAmount\":null,\"fee_total\":null,\"mode\":\"BALANCE\",\"src\":\"${SRC}\",\"tgt\":\"${TGT}\",\"amount\":${amt},\"midTarget\":null,\"fee_bps\":null,\"pair\":\"${SRC}->${TGT}\",\"status\":\"error\"}" >> "$TMPFILE"
       continue
     fi
 
@@ -77,7 +100,6 @@ for pair in "${PAIRS[@]}"; do
             else null end
           ) as $bps
         | {
-            # core fields
             ts: $ts,
             sourceCurrency: $src,
             targetCurrency: $tgt,
@@ -89,17 +111,13 @@ for pair in "${PAIRS[@]}"; do
             fee_total:    $feeTot,
             status: ( if ($rate != null and $tgtAmt != null) then "ok" else "incomplete" end ),
 
-            # website helpers / aliases
+            # website helpers
             mode: ($opt.payOut // "BALANCE"),
             src:  $src,
             tgt:  $tgt,
             amount: $amt,
             midTarget: $mid,
             fee_bps: $bps,
-            bps: $bps,
-            bps_vs_mid: $bps,
-            y: $bps,
-            x: $amt,
             pair: ($src + "->" + $tgt)
           }')
 
@@ -117,15 +135,8 @@ if [[ ! -s "$OUTFILE" ]]; then
 fi
 
 rows_total="$(jq 'length' "$OUTFILE" 2>/dev/null || echo 0)"
-rows_valid="$(jq '[.[] | select(.y != null)] | length' "$OUTFILE" 2>/dev/null || echo 0)"
-echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} valid points)"
+rows_valid="$(jq '[.[] | select(.fee_bps != null)] | length' "$OUTFILE" 2>/dev/null || echo 0)"
+echo "Wrote ${OUTFILE} with ${rows_total} rows (${rows_valid} valid points) from ${#PAIRS[@]} pairs x ${#AMOUNTS[@]} amounts"
 
-cp "$OUTFILE" "$SITE_OUTFILE"
-echo "Copied $OUTFILE -> $SITE_OUTFILE"
-
-MIN_ROWS=${MIN_ROWS:-10}
-if (( rows_total < MIN_ROWS )); then
-  echo "Warning: Only ${rows_total} rows (< ${MIN_ROWS}). Continuing so downstream steps can run."
-fi
-
+# Keep job green unless the file is empty.
 exit 0
