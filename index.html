@@ -10,21 +10,35 @@
     h1{font-size:44px;margin:0 0 8px}
     .muted{color:#666;margin:0 0 16px}
     .controls{display:flex;gap:12px;align-items:center;margin:8px 0 16px;flex-wrap:wrap}
-    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
-    .title{font-weight:800;font-size:26px;letter-spacing:.2px;margin:4px 0 12px}
+    .tabs{display:flex;gap:12px;margin:8px 0 16px}
+    .tabbtn{padding:6px 10px;border:1px solid #ddd;border-radius:10px;background:#fafafa;cursor:pointer}
+    .tabbtn.active{background:#eaeaea}
+    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:20px}
+    .title{font-weight:800;font-size:28px;letter-spacing:.2px;margin:4px 0 12px}
     canvas{width:100% !important;height:420px !important}
-    button.swap{padding:6px 10px;border:1px solid #ddd;border-radius:10px;background:#fafafa;cursor:pointer}
-    select{padding:6px 8px;border:1px solid #ddd;border-radius:10px;background:#fff}
+    select,button{padding:6px 8px;border:1px solid #ddd;border-radius:10px;background:#fff}
+    button.btn{background:#fafafa;cursor:pointer}
+    table{width:100%; border-collapse:collapse; margin-top:16px; font-size:14px}
+    thead th{position:sticky; top:0; background:#fafafa; border-bottom:1px solid #eee; text-align:left; padding:8px}
+    tbody td{border-bottom:1px solid #f1f1f1; padding:8px}
+    .right{ text-align:right }
+    /* small-multiple grid */
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    @media (min-width:1100px){ .grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
+    .mini canvas{height:280px !important}
+    .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
+    .pill{padding:6px 10px;border:1px solid #ddd;border-radius:999px;background:#fafafa;cursor:pointer}
+    .pill.active{background:#eaeaea}
   </style>
 </head>
 <body>
-  <h1>FX Cost Curves</h1>
-  <p class="muted">Daily Wise quotes. Y-axis is fee in <b>bps vs mid outcome</b>. X-axis is source amount.</p>
+  <h1>FX Cost Curves <span id="updated" class="muted" style="font-size:16px"></span></h1>
+  <p class="muted">Daily Wise quotes. Y-axis is <b>fee (bps)</b>. X-axis is source amount.</p>
 
   <div class="controls">
     <label>From:</label>
     <select id="from"></select>
-    <button id="swap" class="swap" title="Swap">⇆</button>
+    <button id="swap" class="btn" title="Swap">⇆</button>
     <label>To:</label>
     <select id="to"></select>
 
@@ -33,19 +47,63 @@
     <label>Mode:</label>
     <select id="mode">
       <option value="BALANCE" selected>BALANCE</option>
-      <option value="ALL">ALL</option>
       <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+      <option value="ALL">ALL</option>
+    </select>
+
+    <label>Y scale:</label>
+    <select id="yscale">
+      <option value="auto" selected>Auto</option>
+      <option value="linear">Linear</option>
+      <option value="log">Log</option>
     </select>
 
     <span id="badge" class="muted"></span>
+    <button id="download" class="btn">Download CSV</button>
   </div>
 
-  <div class="card">
-    <div id="title" class="title"></div>
-    <canvas id="chart"></canvas>
+  <div class="tabs">
+    <button class="tabbtn active" data-tab="single">Single Pair</button>
+    <button class="tabbtn" data-tab="all">All From Source</button>
+  </div>
+
+  <!-- Single pair -->
+  <div id="tab-single">
+    <div class="card">
+      <div id="title" class="title"></div>
+      <canvas id="chart"></canvas>
+      <table id="table">
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th class="right">Amount (src)</th>
+            <th class="right">Fee (bps)</th>
+            <th class="right">Fee (src)</th>
+            <th class="right">Rate</th>
+            <th class="right">Target (tgt)</th>
+            <th class="right">Rounding bps</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- All pairs from a source (small multiples) -->
+  <div id="tab-all" style="display:none">
+    <div class="card">
+      <div class="title">All pairs from <span id="all-src">USD</span> (<span id="all-mode">BALANCE</span>)</div>
+      <div class="pillrow" id="src-pills"></div>
+      <div class="grid" id="all-grid"></div>
+    </div>
   </div>
 
   <script>
+    const nf0 = new Intl.NumberFormat(undefined, {maximumFractionDigits:0});
+    const nf2 = new Intl.NumberFormat(undefined, {maximumFractionDigits:2});
+    const nf4 = new Intl.NumberFormat(undefined, {maximumFractionDigits:4});
+    const nf6 = new Intl.NumberFormat(undefined, {maximumFractionDigits:6});
+
     const fmtK = n => {
       const x = Number(n);
       if (!isFinite(x)) return String(n);
@@ -63,7 +121,7 @@
     const yVal = d => {
       const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
       const v = Number(y);
-      return Number.isFinite(v) ? v : null;
+      return Number.isFinite(v) && v > 0 ? v : null;
     };
     const xVal = d => {
       const x = d.amount ?? d.sourceAmount ?? d.x;
@@ -77,145 +135,206 @@
         s.add(String(r.src ?? r.sourceCurrency));
         s.add(String(r.tgt ?? r.targetCurrency));
       }
-      return Array.from(s).filter(Boolean).sort();
+      const all = Array.from(s).filter(Boolean);
+      // priority order
+      const prio = ["USD","GBP","EUR","CNY","SGD"];
+      const rest = all.filter(c => !prio.includes(c)).sort();
+      return prio.filter(c=>all.includes(c)).concat(rest);
     }
 
-    function filterPair(rows, from, to, mode){
-      return rows.filter(r => {
-        const src = r.src ?? r.sourceCurrency;
-        const tgt = r.tgt ?? r.targetCurrency;
-        const m = r.mode ?? r.payOut;
-        if (src !== from || tgt !== to) return false;
-        if (mode === 'ALL') return true;
-        return (m === mode);
-      });
+    function filterPair(rows, from, to){
+      return rows.filter(r => (r.src ?? r.sourceCurrency)===from && (r.tgt ?? r.targetCurrency)===to);
+    }
+    function filterFrom(rows, from){
+      return rows.filter(r => (r.src ?? r.sourceCurrency)===from);
     }
 
-    // --- NEW: smart y-domain with headroom/tailroom ---
-    function yDomain(points){
-      if (!points.length) return {min:0, max:1};
-      const ys = points.map(p => p.y);
-      const yMinRaw = Math.min(...ys);
-      const yMaxRaw = Math.max(...ys);
-      const span = yMaxRaw - yMinRaw;
+    function buildDatasets(items, modeSel, from, to){
+      const groups = new Map();
+      for (const r of items){
+        const m = r.mode ?? r.payOut ?? 'BALANCE';
+        if (modeSel !== 'ALL' && m !== modeSel) continue;
+        const x = xVal(r), y = yVal(r);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        if (!groups.has(m)) groups.set(m, []);
+        groups.get(m).push({x, y});
+      }
+      const out = [];
+      for (const [m, pts] of groups){
+        pts.sort((a,b)=>a.x-b.x);
+        out.push({ label:`${from}->${to} (${m})`, data:pts, borderWidth:2, pointRadius:3, tension:0.2, spanGaps:true});
+      }
+      return out;
+    }
 
-      // 15–20% padding, at least 2 bps; if span is very tight, ensure ~5–8 bps total padding
-      let pad = Math.max(span * 0.18, 2);
-      if (span < 8) pad = Math.max(pad, 4);
+    function yStats(datasets){
+      const ys=[]; datasets.forEach(ds=>ds.data.forEach(p=>ys.push(p.y)));
+      if (!ys.length) return {min:0,max:1};
+      return {min:Math.min(...ys), max:Math.max(...ys)};
+    }
+    function linearDomain(min,max){
+      const span=max-min; let pad=Math.max(span*0.18,2); if(span<8) pad=Math.max(pad,4);
+      let y0=Math.max(0, min-pad), y1=max+pad;
+      y0=Math.floor(y0/5)*5; y1=Math.ceil(y1/5)*5; if(y1<=y0) y1=y0+5;
+      return {y0,y1};
+    }
+    function logDomain(min,max){ return {y0:Math.max(0.1, min*0.85), y1:max*1.2}; }
 
-      let yMin = Math.max(0, yMinRaw - pad);
-      let yMax = yMaxRaw + pad;
-
-      // Round to nice 5-bps ticks
-      yMin = Math.floor(yMin / 5) * 5;
-      yMax = Math.ceil(yMax / 5) * 5;
-      if (yMax <= yMin) yMax = yMin + 5;
-
-      return {min: yMin, max: yMax};
+    function attachTable(rows, from, to, modeSel){
+      const body=document.querySelector('#table tbody'); body.innerHTML='';
+      const items = rows.filter(r=>{
+        const src=r.src??r.sourceCurrency, tgt=r.tgt??r.targetCurrency, m=r.mode??r.payOut??'BALANCE';
+        if(src!==from||tgt!==to) return false;
+        if(modeSel!=='ALL'&&m!==modeSel) return false;
+        return Number.isFinite(xVal(r)) && Number.isFinite(yVal(r));
+      }).sort((a,b)=>(a.amount-b.amount)||String((a.mode??a.payOut)).localeCompare(String((b.mode??b.payOut))));
+      for(const r of items){
+        const tr=document.createElement('tr');
+        const m=r.mode??r.payOut??'BALANCE';
+        const cells=[m, nf0.format(r.amount??r.sourceAmount), nf2.format(yVal(r)),
+          (r.fee_total!=null?nf4.format(+r.fee_total):''), (r.rate!=null?nf6.format(+r.rate):''),
+          (r.targetAmount!=null?nf4.format(+r.targetAmount):''), (r.rounding_bps!=null?nf2.format(+r.rounding_bps):'')];
+        cells.forEach((v,i)=>{const td=document.createElement('td'); td.textContent=v; if(i>0) td.className='right'; tr.appendChild(td);});
+        body.appendChild(tr);
+      }
+      document.getElementById('download').onclick=()=>{
+        const header=['mode','amount_src','fee_bps','fee_src','rate','target_tgt','rounding_bps'];
+        const lines=[header.join(',')];
+        for(const r of items){
+          lines.push([(r.mode??r.payOut??'BALANCE'), (r.amount??r.sourceAmount),
+            (yVal(r)?.toFixed(4)??''), (r.fee_total??''), (r.rate??''), (r.targetAmount??''), (r.rounding_bps??'')].join(','));
+        }
+        const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+        const url=URL.createObjectURL(blob); const a=document.createElement('a');
+        a.href=url; a.download=`${from}-${to}-${(modeSel==='ALL'?'ALL':modeSel)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      };
     }
 
     (async function init(){
       const rows = await loadData();
 
-      // Populate currency dropdowns
+      // Updated timestamp
+      const last = rows.map(r=>new Date(r.ts)).filter(d=>!isNaN(d)).sort((a,b)=>b-a)[0];
+      if(last) document.getElementById('updated').textContent = `· Updated ${last.toISOString().replace('T',' ').replace('Z',' UTC')}`;
+
+      const fromEl=document.getElementById('from'), toEl=document.getElementById('to'), modeEl=document.getElementById('mode'), yscaleEl=document.getElementById('yscale');
+      const swapBtn=document.getElementById('swap'), titleEl=document.getElementById('title'), badgeEl=document.getElementById('badge');
+
+      // currencies in priority order
       const curList = uniqueSortedCurrencies(rows);
-      const fromEl = document.getElementById('from');
-      const toEl = document.getElementById('to');
-      const modeEl = document.getElementById('mode');
-      const swapBtn = document.getElementById('swap');
-      const titleEl = document.getElementById('title');
-      const badgeEl = document.getElementById('badge');
-
       for (const c of curList){
-        const o1 = document.createElement('option'); o1.value = o1.textContent = c; fromEl.appendChild(o1);
-        const o2 = document.createElement('option'); o2.value = o2.textContent = c; toEl.appendChild(o2);
+        const o1=document.createElement('option'); o1.value=o1.textContent=c; fromEl.appendChild(o1);
+        const o2=document.createElement('option'); o2.value=o2.textContent=c; toEl.appendChild(o2);
       }
-      // Defaults: GBP -> USD
-      if (curList.includes('GBP')) fromEl.value = 'GBP';
-      if (curList.includes('USD')) toEl.value = 'USD';
-      if (fromEl.value === toEl.value) toEl.value = curList.find(c => c !== fromEl.value) || curList[0];
+      fromEl.value=curList.includes('GBP')?'GBP':curList[0];
+      toEl.value=curList.includes('USD')?'USD':(curList.find(x=>x!==fromEl.value)||curList[1]);
 
-      const ctx = document.getElementById('chart').getContext('2d');
-      let chart = null;
+      // Single chart
+      const ctx=document.getElementById('chart').getContext('2d'); let chart=null;
 
-      function render(){
-        const from = fromEl.value;
-        const to = toEl.value;
-        const mode = modeEl.value;
+      function renderSingle(){
+        const from=fromEl.value, to=toEl.value, modeSel=modeEl.value, scaleSel=yscaleEl.value;
+        const items=filterPair(rows, from, to);
+        const datasets=buildDatasets(items, modeSel, from, to);
+        const {min, max}=yStats(datasets);
+        const useLog = (scaleSel==='log') || (scaleSel==='auto' && max && (max>500 || (min>0 && (max/min)>50)));
+        const {y0,y1} = useLog ? logDomain(min||0.1, max||1) : linearDomain(min||0, max||1);
 
-        const items = filterPair(rows, from, to, mode);
-        const points = items
-          .map(d => ({ x: xVal(d), y: yVal(d) }))
-          .filter(p => Number.isFinite(p.x) && Number.isFinite(p.y))
-          .sort((a,b) => a.x - b.x);
+        titleEl.textContent = `${from}->${to} (${modeSel})`;
+        const pointCount = datasets.reduce((s,ds)=>s+ds.data.length,0);
+        badgeEl.textContent = `Series: ${datasets.length} · Points: ${pointCount}`;
 
-        const {min: yMin, max: yMax} = yDomain(points);
-        titleEl.textContent = `${from}->${to} (${mode})`;
-        badgeEl.textContent = `Points: ${points.length}`;
-
-        const data = {
-          datasets: [{
-            label: `${from}->${to} (${mode})`,
-            data: points,
-            borderWidth: 2,
-            pointRadius: 3,
-            tension: 0.2,
-            spanGaps: true
-          }]
-        };
-
-        const options = {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: false,
-          plugins: {
-            legend: { position: 'top' },
-            tooltip: {
-              callbacks: {
-                label: ctx => ` amount ${ctx.parsed.x}, fee ${ctx.parsed.y.toFixed(2)} bps`
-              }
-            }
-          },
-          scales: {
-            x: {
-              type: 'logarithmic',
-              min: points.length ? Math.min(...points.map(p=>p.x)) : 10,
-              max: points.length ? Math.max(...points.map(p=>p.x)) : 1_000_000,
-              ticks: { callback: v => fmtK(v) },
-              title: { display: true, text: 'Source Amount' }
-            },
-            y: {
-              // No beginAtZero; use smart domain so the series isn’t stuck at the top
-              min: yMin,
-              max: yMax,
-              ticks: {
-                callback: v => Number(v).toFixed(0) // whole-bps ticks
-              },
-              title: { display: true, text: 'Fee (bps) vs Mid' }
-            }
+        const data={datasets};
+        const options={
+          responsive:true, maintainAspectRatio:false, animation:false,
+          plugins:{legend:{position:'top'},
+            tooltip:{callbacks:{label: c => {
+              // clearer labels
+              return `${c.dataset.label}: amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`;
+            }}}},
+          scales:{
+            x:{type:'logarithmic',
+               min: datasets.length?Math.min(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):10,
+               max: datasets.length?Math.max(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):1_000_000,
+               ticks:{callback:v=>fmtK(v)}, title:{display:true,text:'Source Amount'}},
+            y: Object.assign(
+              {title:{display:true,text:'Fee (bps)'}},
+              useLog?{type:'logarithmic',min:y0,max:y1}:{type:'linear',min:y0,max:y1,ticks:{callback:v=>nf0.format(v)}}
+            )
           }
         };
-
-        if (!chart){
-          chart = new Chart(ctx, { type: 'line', data, options });
-        } else {
-          chart.data = data;
-          chart.options = options;
-          chart.update();
-        }
+        if(!chart){ chart=new Chart(ctx,{type:'line',data,options}); } else { chart.data=data; chart.options=options; chart.update(); }
+        attachTable(rows, from, to, modeSel);
       }
 
-      fromEl.addEventListener('change', render);
-      toEl.addEventListener('change', render);
-      modeEl.addEventListener('change', render);
-      document.getElementById('swap').addEventListener('click', () => {
-        const a = fromEl.value; fromEl.value = toEl.value; toEl.value = a; render();
+      fromEl.addEventListener('change', renderSingle);
+      toEl.addEventListener('change', renderSingle);
+      modeEl.addEventListener('change', ()=>{ renderSingle(); renderAll(); });
+      yscaleEl.addEventListener('change', ()=>{ renderSingle(); renderAll(); });
+      swapBtn.addEventListener('click', ()=>{ const a=fromEl.value; fromEl.value=toEl.value; toEl.value=a; renderSingle(); });
+
+      // Tabs
+      const tabs=document.querySelectorAll('.tabbtn');
+      tabs.forEach(b=>b.onclick=()=>{ tabs.forEach(t=>t.classList.remove('active')); b.classList.add('active');
+        document.getElementById('tab-single').style.display = b.dataset.tab==='single'?'':'none';
+        document.getElementById('tab-all').style.display = b.dataset.tab==='all'?'':'none';
+        if(b.dataset.tab==='all') renderAll();
       });
 
-      render();
-    })().catch(err => {
-      document.querySelector('.card').innerHTML =
-        '<div class="muted">Failed to load charts: ' + err.message + '</div>';
+      // All-from-source small multiples
+      const srcPills=document.getElementById('src-pills'), allGrid=document.getElementById('all-grid'), allSrcLbl=document.getElementById('all-src'), allModeLbl=document.getElementById('all-mode');
+      let activeSrc = 'USD'; if(!curList.includes(activeSrc)) activeSrc = curList[0];
+      function buildPills(){
+        srcPills.innerHTML='';
+        curList.forEach(c=>{
+          const btn=document.createElement('button'); btn.textContent=c; btn.className='pill'+(c===activeSrc?' active':'');
+          btn.onclick=()=>{ activeSrc=c; renderAll(); buildPills(); };
+          srcPills.appendChild(btn);
+        });
+      }
+      function renderAll(){
+        allGrid.innerHTML='';
+        const modeSel=modeEl.value, scaleSel=yscaleEl.value;
+        allSrcLbl.textContent=activeSrc; allModeLbl.textContent=modeSel;
+
+        // All targets from active source, ordered by our priority list then alphabetically
+        const targSet = new Set(filterFrom(rows, activeSrc).map(r=>r.tgt ?? r.targetCurrency));
+        const allTargs = Array.from(targSet).filter(t=>t!==activeSrc);
+        const prio = ["USD","GBP","EUR","CNY","SGD"];
+        const ordered = prio.filter(x=>allTargs.includes(x)).concat(allTargs.filter(x=>!prio.includes(x)).sort());
+
+        ordered.forEach(tgt=>{
+          const card=document.createElement('div'); card.className='card mini';
+          const title=document.createElement('div'); title.className='title'; title.textContent=`${activeSrc}->${tgt}`;
+          const canv=document.createElement('canvas'); canv.height=280;
+          card.appendChild(title); card.appendChild(canv); allGrid.appendChild(card);
+
+          const items=filterPair(rows, activeSrc, tgt);
+          const datasets=buildDatasets(items, modeSel, activeSrc, tgt);
+          const {min,max}=yStats(datasets);
+          const useLog=(scaleSel==='log')||(scaleSel==='auto' && max && (max>500 || (min>0&&(max/min)>50)));
+          const {y0,y1}=useLog?logDomain(min||0.1,max||1):linearDomain(min||0,max||1);
+
+          new Chart(canv.getContext('2d'),{
+            type:'line',
+            data:{datasets},
+            options:{
+              responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}},
+              scales:{
+                x:{type:'logarithmic',ticks:{callback:v=>fmtK(v)}},
+                y:Object.assign({},
+                  useLog?{type:'logarithmic',min:y0,max:y1}:{type:'linear',min:y0,max:y1,ticks:{callback:v=>nf0.format(v)}}
+                )
+              }
+            }
+          });
+        });
+      }
+
+      buildPills();
+      renderSingle(); // initial
+    })().catch(err=>{
+      document.getElementById('tab-single').innerHTML='<div class="muted">Failed to load charts: '+err.message+'</div>';
       console.error(err);
     });
   </script>
