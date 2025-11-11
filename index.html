@@ -6,28 +6,29 @@
   <title>FX Cost Curves</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
+    :root{--border:#eee;--muted:#666}
     body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}
-    h1{font-size:44px;margin:0 0 8px}
-    .muted{color:#666;margin:0 0 16px}
-    .controls{display:flex;gap:12px;align-items:center;margin:8px 0 16px;flex-wrap:wrap}
-    .tabs{display:flex;gap:12px;margin:8px 0 16px}
-    .tabbtn{padding:6px 10px;border:1px solid #ddd;border-radius:10px;background:#fafafa;cursor:pointer}
+    h1{font-size:44px;margin:0 0 6px;line-height:1.1}
+    .muted{color:var(--muted)}
+    .controls{display:flex;gap:12px;align-items:center;margin:10px 0 18px;flex-wrap:wrap}
+    .tabs{display:flex;gap:12px;margin:10px 0 18px}
+    .tabbtn{padding:6px 10px;border:1px solid var(--border);border-radius:10px;background:#fafafa;cursor:pointer}
     .tabbtn.active{background:#eaeaea}
-    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:20px}
+    select,button{padding:6px 8px;border:1px solid var(--border);border-radius:10px;background:#fff}
+    button.btn{background:#fafafa;cursor:pointer}
+    .card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:20px}
     .title{font-weight:800;font-size:28px;letter-spacing:.2px;margin:4px 0 12px}
     canvas{width:100% !important;height:420px !important}
-    select,button{padding:6px 8px;border:1px solid #ddd;border-radius:10px;background:#fff}
-    button.btn{background:#fafafa;cursor:pointer}
-    table{width:100%; border-collapse:collapse; margin-top:16px; font-size:14px}
-    thead th{position:sticky; top:0; background:#fafafa; border-bottom:1px solid #eee; text-align:left; padding:8px}
-    tbody td{border-bottom:1px solid #f1f1f1; padding:8px}
-    .right{ text-align:right }
+    table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+    thead th{position:sticky;top:0;background:#fafafa;border-bottom:1px solid var(--border);text-align:left;padding:8px}
+    tbody td{border-bottom:1px solid #f1f1f1;padding:8px}
+    .right{text-align:right}
     /* small-multiple grid */
     .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-    @media (min-width:1100px){ .grid{grid-template-columns:repeat(3,minmax(0,1fr));} }
+    @media (min-width:1100px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
     .mini canvas{height:280px !important}
     .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
-    .pill{padding:6px 10px;border:1px solid #ddd;border-radius:999px;background:#fafafa;cursor:pointer}
+    .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fafafa;cursor:pointer}
     .pill.active{background:#eaeaea}
   </style>
 </head>
@@ -99,6 +100,7 @@
   </div>
 
   <script>
+    // ---------- helpers ----------
     const nf0 = new Intl.NumberFormat(undefined, {maximumFractionDigits:0});
     const nf2 = new Intl.NumberFormat(undefined, {maximumFractionDigits:2});
     const nf4 = new Intl.NumberFormat(undefined, {maximumFractionDigits:4});
@@ -121,7 +123,7 @@
     const yVal = d => {
       const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
       const v = Number(y);
-      return Number.isFinite(v) && v > 0 ? v : null;
+      return Number.isFinite(v) && v > 0 ? v : null; // exclude 0/NaN for log safety
     };
     const xVal = d => {
       const x = d.amount ?? d.sourceAmount ?? d.x;
@@ -136,7 +138,6 @@
         s.add(String(r.tgt ?? r.targetCurrency));
       }
       const all = Array.from(s).filter(Boolean);
-      // priority order
       const prio = ["USD","GBP","EUR","CNY","SGD"];
       const rest = all.filter(c => !prio.includes(c)).sort();
       return prio.filter(c=>all.includes(c)).concat(rest);
@@ -162,7 +163,14 @@
       const out = [];
       for (const [m, pts] of groups){
         pts.sort((a,b)=>a.x-b.x);
-        out.push({ label:`${from}->${to} (${m})`, data:pts, borderWidth:2, pointRadius:3, tension:0.2, spanGaps:true});
+        out.push({
+          label:`${from}->${to} (${m})`,
+          data:pts,
+          borderWidth:2,
+          pointRadius:3,
+          tension:0.2,
+          spanGaps:true
+        });
       }
       return out;
     }
@@ -206,21 +214,30 @@
         }
         const blob=new Blob([lines.join('\n')],{type:'text/csv'});
         const url=URL.createObjectURL(blob); const a=document.createElement('a');
-        a.href=url; a.download=`${from}-${to}-${(modeSel==='ALL'?'ALL':modeSel)}.csv`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+        a.href=url; a.download=`${from}-${to}-${(modeSel==='ALL'?'ALL':modeSel)}.csv`;
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       };
     }
 
     (async function init(){
       const rows = await loadData();
 
-      // Updated timestamp
+      // Updated timestamp (max ts in JSON)
       const last = rows.map(r=>new Date(r.ts)).filter(d=>!isNaN(d)).sort((a,b)=>b-a)[0];
-      if(last) document.getElementById('updated').textContent = `· Updated ${last.toISOString().replace('T',' ').replace('Z',' UTC')}`;
+      if(last){
+        const s = last.toISOString().replace('T',' ').replace('Z',' UTC');
+        document.getElementById('updated').textContent = `· Updated ${s}`;
+      }
 
-      const fromEl=document.getElementById('from'), toEl=document.getElementById('to'), modeEl=document.getElementById('mode'), yscaleEl=document.getElementById('yscale');
-      const swapBtn=document.getElementById('swap'), titleEl=document.getElementById('title'), badgeEl=document.getElementById('badge');
+      const fromEl=document.getElementById('from');
+      const toEl=document.getElementById('to');
+      const modeEl=document.getElementById('mode');
+      const yscaleEl=document.getElementById('yscale');
+      const swapBtn=document.getElementById('swap');
+      const titleEl=document.getElementById('title');
+      const badgeEl=document.getElementById('badge');
 
-      // currencies in priority order
+      // currencies (priority order)
       const curList = uniqueSortedCurrencies(rows);
       for (const c of curList){
         const o1=document.createElement('option'); o1.value=o1.textContent=c; fromEl.appendChild(o1);
@@ -229,15 +246,15 @@
       fromEl.value=curList.includes('GBP')?'GBP':curList[0];
       toEl.value=curList.includes('USD')?'USD':(curList.find(x=>x!==fromEl.value)||curList[1]);
 
-      // Single chart
+      // ---------- Single chart ----------
       const ctx=document.getElementById('chart').getContext('2d'); let chart=null;
 
       function renderSingle(){
         const from=fromEl.value, to=toEl.value, modeSel=modeEl.value, scaleSel=yscaleEl.value;
         const items=filterPair(rows, from, to);
         const datasets=buildDatasets(items, modeSel, from, to);
-        const {min, max}=yStats(datasets);
-        const useLog = (scaleSel==='log') || (scaleSel==='auto' && max && (max>500 || (min>0 && (max/min)>50)));
+        const {min,max}=yStats(datasets);
+        const useLog = (scaleSel==='log') || (scaleSel==='auto' && max && (max>500 || (min>0 && (max/min) > 50)));
         const {y0,y1} = useLog ? logDomain(min||0.1, max||1) : linearDomain(min||0, max||1);
 
         titleEl.textContent = `${from}->${to} (${modeSel})`;
@@ -247,17 +264,16 @@
         const data={datasets};
         const options={
           responsive:true, maintainAspectRatio:false, animation:false,
-          plugins:{legend:{position:'top'},
-            tooltip:{callbacks:{label: c => {
-              // clearer labels
-              return `${c.dataset.label}: amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`;
-            }}}},
+          plugins:{
+            legend:{position:'top'},
+            tooltip:{callbacks:{label: c => `${c.dataset.label}: amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}
+          },
           scales:{
             x:{type:'logarithmic',
                min: datasets.length?Math.min(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):10,
                max: datasets.length?Math.max(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):1_000_000,
                ticks:{callback:v=>fmtK(v)}, title:{display:true,text:'Source Amount'}},
-            y: Object.assign(
+            y:Object.assign(
               {title:{display:true,text:'Fee (bps)'}},
               useLog?{type:'logarithmic',min:y0,max:y1}:{type:'linear',min:y0,max:y1,ticks:{callback:v=>nf0.format(v)}}
             )
@@ -273,7 +289,7 @@
       yscaleEl.addEventListener('change', ()=>{ renderSingle(); renderAll(); });
       swapBtn.addEventListener('click', ()=>{ const a=fromEl.value; fromEl.value=toEl.value; toEl.value=a; renderSingle(); });
 
-      // Tabs
+      // ---------- Tabs ----------
       const tabs=document.querySelectorAll('.tabbtn');
       tabs.forEach(b=>b.onclick=()=>{ tabs.forEach(t=>t.classList.remove('active')); b.classList.add('active');
         document.getElementById('tab-single').style.display = b.dataset.tab==='single'?'':'none';
@@ -281,9 +297,10 @@
         if(b.dataset.tab==='all') renderAll();
       });
 
-      // All-from-source small multiples
+      // ---------- All-from-source ----------
       const srcPills=document.getElementById('src-pills'), allGrid=document.getElementById('all-grid'), allSrcLbl=document.getElementById('all-src'), allModeLbl=document.getElementById('all-mode');
-      let activeSrc = 'USD'; if(!curList.includes(activeSrc)) activeSrc = curList[0];
+      let activeSrc = curList.includes('USD') ? 'USD' : curList[0];
+
       function buildPills(){
         srcPills.innerHTML='';
         curList.forEach(c=>{
@@ -292,12 +309,13 @@
           srcPills.appendChild(btn);
         });
       }
+
       function renderAll(){
         allGrid.innerHTML='';
         const modeSel=modeEl.value, scaleSel=yscaleEl.value;
         allSrcLbl.textContent=activeSrc; allModeLbl.textContent=modeSel;
 
-        // All targets from active source, ordered by our priority list then alphabetically
+        // All targets from active source ordered by priority
         const targSet = new Set(filterFrom(rows, activeSrc).map(r=>r.tgt ?? r.targetCurrency));
         const allTargs = Array.from(targSet).filter(t=>t!==activeSrc);
         const prio = ["USD","GBP","EUR","CNY","SGD"];
@@ -319,7 +337,8 @@
             type:'line',
             data:{datasets},
             options:{
-              responsive:true, maintainAspectRatio:false, animation:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}},
+              responsive:true, maintainAspectRatio:false, animation:false,
+              plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}},
               scales:{
                 x:{type:'logarithmic',ticks:{callback:v=>fmtK(v)}},
                 y:Object.assign({},
