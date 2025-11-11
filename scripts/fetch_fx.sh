@@ -76,11 +76,10 @@ nice_step() {
     }'
 }
 
-# Round up to the chosen step
-round_up_to_step() {
+# Replace your round_up_to_step with round_down_to_step
+round_down_to_step() {
   local val="$1" step="$2"
-  awk -v v="$val" -v s="$step" 'function ceil(x){return (x==int(x))?x:int(x)+1}
-    BEGIN{printf "%.0f", ceil(v/s)*s}'
+  awk -v v="$val" -v s="$step" 'BEGIN{printf "%.0f", int(v/s)*s}'
 }
 
 # Prefetch SRC->USD mid rates (for ladder conversion and capping)
@@ -114,8 +113,8 @@ for SRC in "${CCYS[@]}"; do
       # src_amount ≈ USD / (SRC->USD rate)
       raw=$(awk -v u="$usd" -v r="$rate_usd" 'BEGIN{printf "%.6f", u/r}')
       step="$(nice_step "$raw")"
-      amt="$(round_up_to_step "$raw" "$step")"
-      AMTS+=("$amt")
+ amt="$(round_down_to_step "$raw" "$step")"
+[[ "$amt" -lt 1 ]] && amt=1
     done
   else
     # Fallback to a generic ladder if we couldn't prefetch a rate
