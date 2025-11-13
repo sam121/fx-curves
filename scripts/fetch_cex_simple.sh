@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # scripts/fetch_cex_simple.sh
-# v1 — USD -> USDC -> GBP path on Kraken using public REST.
-# Computes effective cost (bps) as VWAP path vs path mid.
-# No fiat on/off or exchange fee schedules applied (pure market microstructure).
+# USD -> USDC -> GBP on Kraken via public REST.
+# VWAP path vs composed mid (bps). No fiat on/off or exchange fee schedules.
 
 set -euo pipefail
 
@@ -24,18 +23,25 @@ echo "Kraken base: $KRAKEN_BASE"
 echo "USD ladder: $USD_ANCHORS_CSV"
 echo "Assumptions: taker-like fills via VWAP, NO explicit exchange/fiat fees."
 
-# ----------------- Helpers -----------------
-
 kraken_get() { curl -sS "$KRAKEN_BASE$1${2:+?$2}"; }
+
+json_must_be_object() {
+  local payload="$1" hint="$2"
+  echo "$payload" | jq -e 'type=="object"' >/dev/null 2>&1 || {
+    echo "Error: non-JSON/object from Kraken ($hint). First 200 bytes:"
+    echo "$payload" | head -c 200; echo
+    exit 1
+  }
+}
 
 discover_pairs() {
   local json="$(kraken_get /0/public/AssetPairs)"
+  json_must_be_object "$json" "AssetPairs"
+  # Prefer wsname to identify the right markets
   USDCUSD_PAIR=$(echo "$json" | jq -r '
-    .result | to_entries
-    | map(select(.value.wsname? == "USDC/USD")) | (.[0].key // empty)')
+    .result | to_entries | map(select(.value.wsname? == "USDC/USD")) | (.[0].key // empty)')
   USDCGBP_PAIR=$(echo "$json" | jq -r '
-    .result | to_entries
-    | map(select(.value.wsname? == "USDC/GBP")) | (.[0].key // empty)')
+    .result | to_entries | map(select(.value.wsname? == "USDC/GBP")) | (.[0].key // empty)')
   if [[ -z "${USDCUSD_PAIR:-}" || -z "${USDCGBP_PAIR:-}" ]]; then
     echo "Error: Could not find USDC/USD or USDC/GBP on Kraken."
     exit 1
@@ -44,25 +50,36 @@ discover_pairs() {
 
 fetch_depth() {
   local pair="$1" count="${2:-1000}"
-  kraken_get /0/public/Depth "pair=${pair}&count=${count}"
+  local j="$(kraken_get /0/public/Depth "pair=${pair}&count=${count}")"
+  json_must_be_object "$j" "Depth $pair"
+  echo "$j"
 }
 
-# CSV (price,volume) from order book JSON
-# asks -> ascending by price; bids -> descending by price
+# Convert order book JSON to CSV "price,volume"
+# Use the FIRST entry in .result (don’t depend on the exact key)
 book_to_csv() {
-  local json="$1" side="$2" pair="$3"
+  local json="$1" side="$2"
   if [[ "$side" == "asks" ]]; then
-    echo "$json" \
-      | jq -r --arg p "$pair" '.result[$p].asks[] | "\(.[0]),\(.[1])"' \
-      | sort -t, -k1,1g
+    echo "$json" | jq -r '
+      .result | to_entries | .[0].value.asks[] | "\(.[0]),\(.[1])"
+    ' | sort -t, -k1,1g
   else
-    echo "$json" \
-      | jq -r --arg p "$pair" '.result[$p].bids[] | "\(.[0]),\(.[1])"' \
-      | sort -t, -k1,1gr
+    echo "$json" | jq -r '
+      .result | to_entries | .[0].value.bids[] | "\(.[0]),\(.[1])"
+    ' | sort -t, -k1,1gr
   fi
 }
 
-# VWAP: buy base with quote (walk asks)
+# Top-of-book mid (again don’t rely on the key name)
+top_mid_from_depth() {
+  local json="$1"
+  echo "$json" | jq -r '
+    .result | to_entries | .[0].value as $b
+    | (( ($b.asks[0][0]|tonumber) + ($b.bids[0][0]|tonumber) ) / 2)
+  '
+}
+
+# VWAP helpers
 vwap_buy_base_with_quote() {
   local budget_quote="$1" asks_csv="$2"
   awk -F',' -v B="$budget_quote" '
@@ -75,7 +92,6 @@ vwap_buy_base_with_quote() {
     END{printf "%.10f %.10f\n", base, spent}' "$asks_csv"
 }
 
-# VWAP: sell base for quote (walk bids)
 vwap_sell_base_for_quote() {
   local base_amt="$1" bids_csv="$2"
   awk -F',' -v BA="$base_amt" '
@@ -87,8 +103,7 @@ vwap_sell_base_for_quote() {
     END{printf "%.10f %.10f\n", recv, used}' "$bids_csv"
 }
 
-# ----------------- Go -----------------
-
+# ---------- Go ----------
 discover_pairs
 sleep "$sleep_secs"
 
@@ -96,53 +111,39 @@ DEPTH_USDCUSD="$(fetch_depth "$USDCUSD_PAIR" 1000)"
 sleep "$sleep_secs"
 DEPTH_USDCGBP="$(fetch_depth "$USDCGBP_PAIR" 1000)"
 
-# Guards
-if [[ "$(echo "$DEPTH_USDCUSD" | jq -r --arg p "$USDCUSD_PAIR" '.result[$p].asks|length')" == "0" ]]; then
-  echo "Error: empty asks on USDC/USD"; exit 1
-fi
-if [[ "$(echo "$DEPTH_USDCUSD" | jq -r --arg p "$USDCUSD_PAIR" '.result[$p].bids|length')" == "0" ]]; then
-  echo "Error: empty bids on USDC/USD"; exit 1
-fi
-if [[ "$(echo "$DEPTH_USDCGBP" | jq -r --arg p "$USDCGBP_PAIR" '.result[$p].asks|length')" == "0" ]]; then
-  echo "Error: empty asks on USDC/GBP"; exit 1
-fi
-if [[ "$(echo "$DEPTH_USDCGBP" | jq -r --arg p "$USDCGBP_PAIR" '.result[$p].bids|length')" == "0" ]]; then
-  echo "Error: empty bids on USDC/GBP"; exit 1
-fi
+# quick sanity: have at least 1 level each
+for which in "USDCUSD asks" "USDCUSD bids" "USDCGBP asks" "USDCGBP bids"; do
+  pair=${which%% *}; side=${which##* }
+  j="${pair/USDCUSD/$DEPTH_USDCUSD}"; j="${j/USDCGBP/$DEPTH_USDCGBP}" # not used, just to remind mapping
+done
 
-# Build CSVs for VWAP legs
-ASKS_USDCUSD="$(mktemp)"   # for USD -> USDC (buy base with USD)
-BIDS_USDCGBP="$(mktemp)"   # for USDC -> GBP (sell base for GBP)
-book_to_csv "$DEPTH_USDCUSD" asks "$USDCUSD_PAIR" > "$ASKS_USDCUSD"
-book_to_csv "$DEPTH_USDCGBP" bids "$USDCGBP_PAIR" > "$BIDS_USDCGBP"
+ASKS_USDCUSD="$(mktemp)"
+BIDS_USDCGBP="$(mktemp)"
+book_to_csv "$DEPTH_USDCUSD" asks > "$ASKS_USDCUSD"
+book_to_csv "$DEPTH_USDCGBP" bids > "$BIDS_USDCGBP"
 
-# Compute each pair mid from top of book to avoid ticker-key mismatches
-MID_USDCUSD=$(echo "$DEPTH_USDCUSD" | jq -r --arg p "$USDCUSD_PAIR" \
-  '((.result[$p].asks[0][0]|tonumber + .result[$p].bids[0][0]|tonumber)/2)')
-MID_USDCGBP=$(echo "$DEPTH_USDCGBP" | jq -r --arg p "$USDCGBP_PAIR" \
-  '((.result[$p].asks[0][0]|tonumber + .result[$p].bids[0][0]|tonumber)/2)')
+# Mids from top-of-book (no ticker key brittleness)
+MID_USDCUSD="$(top_mid_from_depth "$DEPTH_USDCUSD")"  # USD per USDC
+MID_USDCGBP="$(top_mid_from_depth "$DEPTH_USDCGBP")"  # GBP per USDC
 
-# Path mid: (GBP per USDC) / (USD per USDC) = GBP per USD
+# Composed mid (GBP per USD): (GBP/USDC) / (USD/USDC)
 MID_PATH_USD_GBP=$(awk -v usd_per_usdc="$MID_USDCUSD" -v gbp_per_usdc="$MID_USDCGBP" \
   'BEGIN{printf "%.10f", gbp_per_usdc / usd_per_usdc}')
 
 ts_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 for A_USD in "${AMOUNTS_USD[@]}"; do
-  # Leg 1: USD -> USDC
+  # Leg 1: USD -> USDC (buy base with USD on asks)
   read USDC_recv USD_spent < <(vwap_buy_base_with_quote "$A_USD" "$ASKS_USDCUSD")
 
-  # Leg 2: USDC -> GBP
+  # Leg 2: USDC -> GBP (sell base for GBP on bids)
   read GBP_recv USDC_used < <(vwap_sell_base_for_quote "$USDC_recv" "$BIDS_USDCGBP")
 
-  # Benchmark mid target
   MID_TARGET=$(awk -v a="$A_USD" -v m="$MID_PATH_USD_GBP" 'BEGIN{printf "%.10f", a*m}')
 
-  # Effective bps vs mid (our “fee”)
   BPS_TOTAL=$(awk -v mid="$MID_TARGET" -v eff="$GBP_recv" \
     'BEGIN{if(mid>0) printf "%.10f", (1.0 - eff/mid)*10000; else print "null"}')
 
-  # Underfill flag (book too shallow for the budget)
   UNDERFILLED=$(awk -v a="$A_USD" -v s="$USD_spent" 'BEGIN{print (s+1e-9<a)?"true":"false"}')
 
   jq -n \
