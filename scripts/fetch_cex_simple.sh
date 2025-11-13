@@ -13,7 +13,7 @@ sleep_secs=$(awk -v ms="$REQ_DELAY_MS" 'BEGIN{printf "%.3f", ms/1000.0}')
 USD_ANCHORS_CSV="${USD_ANCHORS:-1000,10000,100000,1000000}"
 IFS=',' read -r -a AMOUNTS_USD <<< "$USD_ANCHORS_CSV"
 
-OUTDIR="docs/data"
+OUTDIR="data"
 OUTFILE="${OUTDIR}/cex_simple.json"
 TMPFILE="$(mktemp)"
 mkdir -p "$OUTDIR"
