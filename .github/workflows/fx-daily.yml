@@ -20,6 +20,7 @@ jobs:
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      # ---------- Wise (unchanged) ----------
       - name: Debug token presence and length (masked)
         shell: bash
         env:
@@ -48,13 +49,13 @@ jobs:
           fi
           echo "Profiles count: $(jq 'length' /tmp/profiles.json)"
 
-      - name: Fetch latest FX data
+      - name: Fetch latest FX data (Wise)
         shell: bash
         env:
           WISE_TOKEN: ${{ secrets.WISE_TOKEN }}
         run: bash scripts/fetch_fx.sh
 
-      - name: Show data size and preview
+      - name: Show Wise data size and preview
         shell: bash
         run: |
           ls -l data || true
@@ -66,10 +67,43 @@ jobs:
             echo "data/latest.json not found"
           fi
 
+      # ---------- Kraken CEX (new) ----------
+      # Secrets you add in repo settings:
+      #   KRAKEN_API_KEY, KRAKEN_API_SECRET  (read-only key)
+      - name: Fetch CEX path (Kraken USD→USDC→GBP)
+        shell: bash
+        env:
+          KRAKEN_API_KEY: ${{ secrets.KRAKEN_API_KEY }}
+          KRAKEN_API_SECRET: ${{ secrets.KRAKEN_API_SECRET }}
+          # keep the run fast:
+          USD_ANCHORS: 1000,10000
+        run: |
+          if [[ -z "$KRAKEN_API_KEY" || -z "$KRAKEN_API_SECRET" ]]; then
+            echo "Kraken secrets not set; skipping CEX step."
+            exit 0
+          fi
+          bash scripts/fetch_cex_simple.sh
+
+      - name: Show Kraken CEX preview
+        shell: bash
+        run: |
+          if [[ -f data/cex_simple.json ]]; then
+            echo "Rows in data/cex_simple.json: $(jq 'length' data/cex_simple.json)"
+            jq -r '.[0]' data/cex_simple.json || true
+          else
+            echo "data/cex_simple.json not found (CEX step may have been skipped)."
+          fi
+
+      # ---------- Commit ----------
       - name: Commit & push data
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/latest.json data/history/*.jsonl || true
+          git add \
+            data/latest.json \
+            data/history/*.jsonl \
+            data/cex_simple.json \
+            data/snapshots/*.json \
+            data/snapshots/manifest.json 2>/dev/null || true
           git commit -m "chore(data): daily update $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes to commit"
           git push
