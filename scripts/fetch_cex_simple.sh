@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # scripts/fetch_cex_simple.sh
-# USD -> USDC -> GBP on Kraken via public REST.
-# Outputs bps vs composed mid from order book ("book only") and a "final" bps including
-# user-supplied taker fee bps per leg (env vars).
+# USD -> USDC -> GBP on Kraken using public depth + your real taker fees.
+# Outputs book-only bps vs composed mid, and final bps including actual taker fees.
 
 set -euo pipefail
 
@@ -10,14 +9,9 @@ KRAKEN_BASE="${KRAKEN_BASE:-https://api.kraken.com}"
 REQ_DELAY_MS="${CEX_REQ_DELAY_MS:-200}"
 sleep_secs=$(awk -v ms="$REQ_DELAY_MS" 'BEGIN{printf "%.3f", ms/1000.0}')
 
-# Small ladder for quick runs (override with USD_ANCHORS env)
+# Small ladder (override with USD_ANCHORS env)
 USD_ANCHORS_CSV="${USD_ANCHORS:-1000,10000,100000,1000000}"
 IFS=',' read -r -a AMOUNTS_USD <<< "$USD_ANCHORS_CSV"
-
-# 🔧 Optional fee inputs (bps). Set from your Kraken schedule.
-# Example: TAKER_BPS_USD_USDC=2 TAKER_BPS_USDC_GBP=2
-TAKER_BPS_USD_USDC="${TAKER_BPS_USD_USDC:-0}"
-TAKER_BPS_USDC_GBP="${TAKER_BPS_USDC_GBP:-0}"
 
 OUTDIR="data"
 OUTFILE="${OUTDIR}/cex_simple.json"
@@ -27,9 +21,34 @@ mkdir -p "$OUTDIR"
 
 echo "Kraken base: $KRAKEN_BASE"
 echo "USD ladder: $USD_ANCHORS_CSV"
-echo "Assumptions: taker-like fills via VWAP; exchange fees injected via env bps."
+echo "Assumptions: taker-like fills via VWAP; using YOUR actual taker fees from private API."
 
-kraken_get() { curl -sS "$KRAKEN_BASE$1${2:+?$2}"; }
+# ---------- auth helpers (required for fees) ----------
+: "${KRAKEN_API_KEY?Set KRAKEN_API_KEY in your env}"
+: "${KRAKEN_API_SECRET?Set KRAKEN_API_SECRET (base64) in your env}"
+
+nonce_ms() { echo "$(($(date +%s)*1000))"; }  # portable ms nonce
+
+b64dec() {
+  # stdin -> decoded
+  if base64 --help 2>&1 | grep -q -- '-d'; then base64 -d
+  else base64 -D
+  fi
+}
+
+kraken_get()  { curl -sS "$KRAKEN_BASE$1${2:+?$2}"; }
+kraken_post() { curl -sS -H "API-Key: $KRAKEN_API_KEY" -H "API-Sign: $3" -d "$2" "$KRAKEN_BASE$1"; }
+
+sign_private() {
+  # args: path postdata
+  local path="$1" postdata="$2" n; n="$(nonce_ms)"
+  local msg="$n$postdata"
+  local shasum; shasum=$(printf "%s" "$msg" | openssl dgst -binary -sha256)
+  local binsec; binsec=$(printf "%s" "$KRAKEN_API_SECRET" | b64dec | od -An -tx1 | tr -d ' \n')
+  # build (path + sha256) as binary
+  local pre; pre=$( { printf "%s" "$path"; cat <<<"$shasum"; } | openssl dgst -binary -sha512 -mac HMAC -macopt "hexkey:$binsec" | base64 )
+  echo "$n" "$pre"
+}
 
 json_must_be_object() {
   local payload="$1" hint="$2"
@@ -40,13 +59,12 @@ json_must_be_object() {
   }
 }
 
+# ---------- market discovery ----------
 discover_pairs() {
   local json="$(kraken_get /0/public/AssetPairs)"
   json_must_be_object "$json" "AssetPairs"
-  USDCUSD_PAIR=$(echo "$json" | jq -r '
-    .result | to_entries | map(select(.value.wsname? == "USDC/USD")) | (.[0].key // empty)')
-  USDCGBP_PAIR=$(echo "$json" | jq -r '
-    .result | to_entries | map(select(.value.wsname? == "USDC/GBP")) | (.[0].key // empty)')
+  USDCUSD_PAIR=$(echo "$json" | jq -r '.result | to_entries | map(select(.value.wsname=="USDC/USD")) | (.[0].key // empty)')
+  USDCGBP_PAIR=$(echo "$json" | jq -r '.result | to_entries | map(select(.value.wsname=="USDC/GBP")) | (.[0].key // empty)')
   if [[ -z "${USDCUSD_PAIR:-}" || -z "${USDCGBP_PAIR:-}" ]]; then
     echo "Error: Could not find USDC/USD or USDC/GBP on Kraken."
     exit 1
@@ -81,6 +99,27 @@ top_mid_from_depth() {
   '
 }
 
+# ---------- your actual taker fees ----------
+get_taker_fees() {
+  local path="/0/private/TradeVolume"
+  local pairs="pair=${USDCUSD_PAIR},${USDCGBP_PAIR}&fee-info=true"
+  local n sig; read -r n sig < <(sign_private "$path" "$pairs")
+  local post="nonce=$n&$pairs"
+  local resp; resp="$(kraken_post "$path" "$post" "$sig")"
+  json_must_be_object "$resp" "TradeVolume"
+  # percent -> bps (1% = 100 bps). Kraken returns strings like "0.26" (percent).
+  TAKER_PCT_USDCUSD=$(echo "$resp" | jq -r --arg p "$USDCUSD_PAIR" '.result.fees[$p].fee // empty')
+  TAKER_PCT_USDCGBP=$(echo "$resp" | jq -r --arg p "$USDCGBP_PAIR" '.result.fees[$p].fee // empty')
+  if [[ -z "${TAKER_PCT_USDCUSD:-}" || -z "${TAKER_PCT_USDCGBP:-}" ]]; then
+    echo "Error: TradeVolume did not return fee percents for required pairs."
+    echo "$resp" | jq -r '.'
+    exit 1
+  fi
+  TAKER_BPS_USD_USDC=$(awk -v p="$TAKER_PCT_USDCUSD" 'BEGIN{printf "%.10f", p*100}')
+  TAKER_BPS_USDC_GBP=$(awk -v p="$TAKER_PCT_USDCGBP" 'BEGIN{printf "%.10f", p*100}')
+}
+
+# ---------- VWAP helpers ----------
 vwap_buy_base_with_quote() {
   local budget_quote="$1" asks_csv="$2"
   awk -F',' -v B="$budget_quote" '
@@ -122,21 +161,33 @@ MID_USDCGBP="$(top_mid_from_depth "$DEPTH_USDCGBP")"  # GBP per USDC
 MID_PATH_USD_GBP=$(awk -v usd_per_usdc="$MID_USDCUSD" -v gbp_per_usdc="$MID_USDCGBP" \
   'BEGIN{printf "%.10f", gbp_per_usdc / usd_per_usdc}')
 
+# fetch your actual taker fees
+get_taker_fees
+echo "Taker bps: USDC/USD=${TAKER_BPS_USD_USDC}, USDC/GBP=${TAKER_BPS_USDC_GBP}"
+
 ts_iso="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 for A_USD in "${AMOUNTS_USD[@]}"; do
+  # Leg 1: USD -> USDC
   read USDC_recv USD_spent < <(vwap_buy_base_with_quote "$A_USD" "$ASKS_USDCUSD")
+  # Leg 2: USDC -> GBP
   read GBP_recv  USDC_used < <(vwap_sell_base_for_quote "$USDC_recv" "$BIDS_USDCGBP")
 
+  # Book-only bps vs composed mid
   MID_TARGET=$(awk -v a="$A_USD" -v m="$MID_PATH_USD_GBP" 'BEGIN{printf "%.10f", a*m}')
   BPS_BOOK=$(awk -v mid="$MID_TARGET" -v eff="$GBP_recv" \
     'BEGIN{if(mid>0) printf "%.10f", (1.0 - eff/mid)*10000; else print "null"}')
 
-  # Add user-supplied taker fee bps per leg
-  BPS_FEES=$(awk -v b1="$TAKER_BPS_USD_USDC" -v b2="$TAKER_BPS_USDC_GBP" \
-    'BEGIN{printf "%.10f", b1 + b2}')
-  BPS_FINAL=$(awk -v a="$BPS_BOOK" -v f="$BPS_FEES" \
-    'BEGIN{if(a=="null") print "null"; else printf "%.10f", a + f}')
+  # Apply actual taker fees multiplicatively to flow:
+  # Kraken charges fees in the asset you receive.
+  # Buy USDC with USD: fee reduces USDC. Sell USDC for GBP: fee reduces GBP.
+  FEE1_PCT=$(awk -v bps="$TAKER_BPS_USD_USDC" 'BEGIN{printf "%.10f", bps/10000}')
+  FEE2_PCT=$(awk -v bps="$TAKER_BPS_USDC_GBP" 'BEGIN{printf "%.10f", bps/10000}')
+  GBP_final=$(awk -v g="$GBP_recv" -v f1="$FEE1_PCT" -v f2="$FEE2_PCT" \
+    'BEGIN{printf "%.10f", g * (1.0 - f1) * (1.0 - f2)}')
+
+  BPS_FINAL=$(awk -v mid="$MID_TARGET" -v eff="$GBP_final" \
+    'BEGIN{if(mid>0) printf "%.10f", (1.0 - eff/mid)*10000; else print "null"}')
 
   UNDERFILLED=$(awk -v a="$A_USD" -v s="$USD_spent" 'BEGIN{print (s+1e-9<a)?"true":"false"}')
 
@@ -148,18 +199,20 @@ for A_USD in "${AMOUNTS_USD[@]}"; do
     --arg src "USD" --arg tgt "GBP" \
     --argjson amount "$A_USD" \
     --argjson mid_path "$MID_PATH_USD_GBP" \
-    --argjson gbp_out "$GBP_recv" \
+    --argjson gbp_out_book "$GBP_recv" \
     --argjson bps_book "$BPS_BOOK" \
-    --argjson bps_exchange_fees "$BPS_FEES" \
+    --argjson taker_bps_usd_usdc "$TAKER_BPS_USD_USDC" \
+    --argjson taker_bps_usdc_gbp "$TAKER_BPS_USDC_GBP" \
+    --argjson gbp_out_final "$GBP_final" \
     --argjson bps_total_final "$BPS_FINAL" \
     --arg underfilled "$UNDERFILLED" \
     '{
       ts:$ts, rail:$rail, venue:$venue, path:$path,
       src:$src, tgt:$tgt, amount:$amount,
-      mid_path:$mid_path, gbp_out:$gbp_out,
-      bps_vs_mid_book:$bps_book,
-      bps_exchange_fees:$bps_exchange_fees,
-      bps_total_final:$bps_total_final,
+      mid_path:$mid_path,
+      gbp_out_book:$gbp_out_book, bps_vs_mid_book:$bps_book,
+      taker_bps_usd_usdc:$taker_bps_usd_usdc, taker_bps_usdc_gbp:$taker_bps_usdc_gbp,
+      gbp_out_final:$gbp_out_final, bps_total_final:$bps_total_final,
       underfilled:($underfilled=="true"),
       status:"ok"
     }' >> "$TMPFILE"
