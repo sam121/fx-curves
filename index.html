@@ -6,98 +6,312 @@
   <title>FX Cost Curves</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-    :root{--border:#eee;--muted:#666}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:24px}
-    h1{font-size:44px;margin:0 0 6px;line-height:1.1}
+    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap');
+
+    :root{
+      --bg-a:#eef8ff;
+      --bg-b:#fff7e8;
+      --ink:#16243b;
+      --muted:#5f6c84;
+      --border:#d6e4f0;
+      --surface:rgba(255,255,255,0.92);
+      --surface-strong:#ffffff;
+      --accent:#137f77;
+      --accent-strong:#0f4a88;
+      --accent-soft:#dff4ef;
+      --shadow:0 16px 48px rgba(23,53,92,0.12);
+      --radius:20px;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      color:var(--ink);
+      font-family:"Manrope","Avenir Next","Segoe UI",sans-serif;
+      background:
+        radial-gradient(900px 560px at 8% -8%, #caecff 0%, rgba(202,236,255,0) 56%),
+        radial-gradient(760px 600px at 102% 0%, #ffe6c3 0%, rgba(255,230,195,0) 62%),
+        linear-gradient(145deg, var(--bg-a) 0%, var(--bg-b) 100%);
+      padding:26px clamp(16px, 3vw, 42px) 32px;
+    }
+    body::before{
+      content:"";
+      position:fixed;
+      inset:0;
+      pointer-events:none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.45) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.45) 1px, transparent 1px);
+      background-size:48px 48px;
+      opacity:0.34;
+      mix-blend-mode:soft-light;
+    }
+
+    .app{max-width:1260px;margin:0 auto}
+    .hero{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:14px}
+    h1{
+      margin:0;
+      font-size:clamp(34px, 6vw, 54px);
+      line-height:1.04;
+      letter-spacing:-0.04em;
+      text-wrap:balance;
+    }
     .muted{color:var(--muted)}
-    .controls{display:flex;gap:12px;align-items:center;margin:10px 0 18px;flex-wrap:wrap}
-    .tabs{display:flex;gap:12px;margin:10px 0 18px}
-    .tabbtn{padding:6px 10px;border:1px solid var(--border);border-radius:10px;background:#fafafa;cursor:pointer}
-    .tabbtn.active{background:#eaeaea}
-    select,button{padding:6px 8px;border:1px solid var(--border);border-radius:10px;background:#fff}
-    button.btn{background:#fafafa;cursor:pointer}
-    .card{background:#fff;border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.04);margin-bottom:20px}
-    .title{font-weight:800;font-size:28px;letter-spacing:.2px;margin:4px 0 12px}
+    .subtitle{margin:10px 0 0;font-size:16px}
+
+    .controls{
+      display:flex;
+      flex-wrap:wrap;
+      align-items:flex-end;
+      gap:10px;
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      backdrop-filter:blur(8px);
+      box-shadow:var(--shadow);
+      padding:14px;
+      margin:14px 0 20px;
+    }
+    .field{display:flex;flex-direction:column;gap:6px;min-width:130px}
+    .field label{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
+    .sep{width:1px;align-self:stretch;background:var(--border);margin:0 6px}
+    select,button{
+      border:1px solid var(--border);
+      border-radius:12px;
+      background:#fff;
+      color:var(--ink);
+      font-family:inherit;
+      font-weight:700;
+      font-size:14px;
+      padding:10px 12px;
+      transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease, background-color .2s ease;
+    }
+    select{min-height:42px}
+    button{cursor:pointer}
+    select:focus-visible,button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(19,127,119,0.18)}
+    button:hover{transform:translateY(-1px)}
+    .btn{background:var(--accent-soft)}
+    .btn:hover{background:#d0eee7}
+    #swap{
+      align-self:flex-end;
+      width:42px;
+      height:42px;
+      border-radius:50%;
+      padding:0;
+      font-size:16px;
+      background:var(--surface-strong);
+    }
+    .metrics{display:flex;align-items:center;gap:10px;margin-left:auto}
+    #badge{
+      display:inline-flex;
+      align-items:center;
+      border:1px solid var(--border);
+      border-radius:999px;
+      background:rgba(255,255,255,0.78);
+      padding:8px 12px;
+      font-size:13px;
+      white-space:nowrap;
+    }
+
+    .tabs{
+      display:flex;
+      gap:8px;
+      width:max-content;
+      max-width:100%;
+      margin:0 0 14px;
+      padding:6px;
+      background:rgba(255,255,255,0.82);
+      border:1px solid var(--border);
+      border-radius:14px;
+      backdrop-filter:blur(6px);
+    }
+    .tabbtn{
+      padding:8px 14px;
+      border-radius:10px;
+      border-color:transparent;
+      background:transparent;
+      color:var(--muted);
+    }
+    .tabbtn.active{
+      background:linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+      color:#fff;
+      box-shadow:0 10px 20px rgba(15,74,136,0.2);
+    }
+
+    .card{
+      background:var(--surface);
+      border:1px solid var(--border);
+      border-radius:var(--radius);
+      padding:18px;
+      box-shadow:var(--shadow);
+      margin-bottom:20px;
+      backdrop-filter:blur(8px);
+      animation:rise .44s ease both;
+    }
+    .title{
+      font-size:clamp(21px, 3.4vw, 31px);
+      line-height:1.2;
+      letter-spacing:-0.025em;
+      font-weight:800;
+      margin:4px 0 14px;
+    }
+    .mini .title{font-size:20px}
     canvas{width:100% !important;height:420px !important}
-    table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
-    thead th{position:sticky;top:0;background:#fafafa;border-bottom:1px solid var(--border);text-align:left;padding:8px}
-    tbody td{border-bottom:1px solid #f1f1f1;padding:8px}
+
+    .table-wrap{
+      margin-top:16px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:auto;
+      background:var(--surface-strong);
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+      min-width:700px;
+    }
+    thead th{
+      position:sticky;
+      top:0;
+      background:#f5fbff;
+      border-bottom:1px solid var(--border);
+      text-align:left;
+      padding:10px 9px;
+      font-size:12px;
+      text-transform:uppercase;
+      letter-spacing:.03em;
+      color:#526480;
+    }
+    tbody td{
+      border-bottom:1px solid #edf2f8;
+      padding:9px;
+      font-variant-numeric:tabular-nums;
+      font-family:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+      font-size:12px;
+    }
+    tbody tr:nth-child(even){background:#fcfeff}
     .right{text-align:right}
-    /* small-multiple grid */
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-    @media (min-width:1100px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+
+    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    @media (min-width:1120px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
     .mini canvas{height:280px !important}
-    .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 12px}
-    .pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:#fafafa;cursor:pointer}
-    .pill.active{background:#eaeaea}
+    .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
+    .pill{
+      padding:7px 12px;
+      border:1px solid var(--border);
+      border-radius:999px;
+      background:#fff;
+      font-size:13px;
+      font-weight:800;
+    }
+    .pill.active{
+      background:var(--accent);
+      border-color:var(--accent);
+      color:#fff;
+    }
+
+    @media (max-width:760px){
+      .controls{padding:12px}
+      .field{min-width:calc(50% - 8px)}
+      .sep{display:none}
+      #swap{order:3}
+      .metrics{margin-left:0;width:100%;justify-content:space-between}
+      .tabs{width:100%}
+      .tabbtn{flex:1}
+      .grid{grid-template-columns:1fr}
+    }
+
+    @keyframes rise{
+      from{opacity:0;transform:translateY(12px)}
+      to{opacity:1;transform:translateY(0)}
+    }
   </style>
 </head>
 <body>
-  <h1>FX Cost Curves <span id="updated" class="muted" style="font-size:16px"></span></h1>
-  <p class="muted">Daily Wise quotes. Y-axis is <b>fee (bps)</b>. X-axis is source amount.</p>
+  <main class="app">
+    <header class="hero">
+      <div>
+        <h1>FX Cost Curves <span id="updated" class="muted" style="font-size:16px"></span></h1>
+        <p class="subtitle muted">Daily Wise quotes. Y-axis is <b>fee (bps)</b>. X-axis is source amount.</p>
+      </div>
+    </header>
 
-  <div class="controls">
-    <label>From:</label>
-    <select id="from"></select>
-    <button id="swap" class="btn" title="Swap">⇆</button>
-    <label>To:</label>
-    <select id="to"></select>
+    <div class="controls">
+      <div class="field">
+        <label for="from">From</label>
+        <select id="from"></select>
+      </div>
+      <button id="swap" class="btn" title="Swap">⇆</button>
+      <div class="field">
+        <label for="to">To</label>
+        <select id="to"></select>
+      </div>
 
-    <span style="width:24px"></span>
+      <div class="sep" aria-hidden="true"></div>
 
-    <label>Mode:</label>
-    <select id="mode">
-      <option value="BALANCE" selected>BALANCE</option>
-      <option value="BANK_TRANSFER">BANK_TRANSFER</option>
-      <option value="ALL">ALL</option>
-    </select>
+      <div class="field">
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="BALANCE" selected>BALANCE</option>
+          <option value="BANK_TRANSFER">BANK_TRANSFER</option>
+          <option value="ALL">ALL</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="yscale">Y scale</label>
+        <select id="yscale">
+          <option value="auto" selected>Auto</option>
+          <option value="linear">Linear</option>
+          <option value="log">Log</option>
+        </select>
+      </div>
 
-    <label>Y scale:</label>
-    <select id="yscale">
-      <option value="auto" selected>Auto</option>
-      <option value="linear">Linear</option>
-      <option value="log">Log</option>
-    </select>
-
-    <span id="badge" class="muted"></span>
-    <button id="download" class="btn">Download CSV</button>
-  </div>
-
-  <div class="tabs">
-    <button class="tabbtn active" data-tab="single">Single Pair</button>
-    <button class="tabbtn" data-tab="all">All From Source</button>
-  </div>
-
-  <!-- Single pair -->
-  <div id="tab-single">
-    <div class="card">
-      <div id="title" class="title"></div>
-      <canvas id="chart"></canvas>
-      <table id="table">
-        <thead>
-          <tr>
-            <th>Mode</th>
-            <th class="right">Amount (src)</th>
-            <th class="right">Fee (bps)</th>
-            <th class="right">Fee (src)</th>
-            <th class="right">Rate</th>
-            <th class="right">Target (tgt)</th>
-            <th class="right">Rounding bps</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
+      <div class="metrics">
+        <span id="badge" class="muted"></span>
+        <button id="download" class="btn">Download CSV</button>
+      </div>
     </div>
-  </div>
 
-  <!-- All pairs from a source (small multiples) -->
-  <div id="tab-all" style="display:none">
-    <div class="card">
-      <div class="title">All pairs from <span id="all-src">USD</span> (<span id="all-mode">BALANCE</span>)</div>
-      <div class="pillrow" id="src-pills"></div>
-      <div class="grid" id="all-grid"></div>
+    <div class="tabs">
+      <button class="tabbtn active" data-tab="single">Single Pair</button>
+      <button class="tabbtn" data-tab="all">All From Source</button>
     </div>
-  </div>
+
+    <!-- Single pair -->
+    <div id="tab-single">
+      <div class="card">
+        <div id="title" class="title"></div>
+        <canvas id="chart"></canvas>
+        <div class="table-wrap">
+          <table id="table">
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th class="right">Amount (src)</th>
+                <th class="right">Fee (bps)</th>
+                <th class="right">Fee (src)</th>
+                <th class="right">Rate</th>
+                <th class="right">Target (tgt)</th>
+                <th class="right">Rounding bps</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- All pairs from a source (small multiples) -->
+    <div id="tab-all" style="display:none">
+      <div class="card">
+        <div class="title">All pairs from <span id="all-src">USD</span> (<span id="all-mode">BALANCE</span>)</div>
+        <div class="pillrow" id="src-pills"></div>
+        <div class="grid" id="all-grid"></div>
+      </div>
+    </div>
+  </main>
 
   <script>
     // ---------- helpers ----------
@@ -113,6 +327,22 @@
       if (x >= 1000) return (x/1000).toFixed(0) + "k";
       return String(x);
     };
+    const paletteByMode = {
+      BALANCE: {line:"#137f77", point:"#0f6b63"},
+      BANK_TRANSFER: {line:"#0f4a88", point:"#0d3e72"}
+    };
+    const fallbackPalette = [
+      {line:"#d56f1a", point:"#b85d0d"},
+      {line:"#b64f3c", point:"#9c3f2e"},
+      {line:"#3d8ece", point:"#2b77b2"}
+    ];
+    const axisGrid = "rgba(42,86,139,0.12)";
+    const axisTick = "#5a6f8f";
+
+    function colorForMode(mode, index){
+      if (paletteByMode[mode]) return paletteByMode[mode];
+      return fallbackPalette[index % fallbackPalette.length];
+    }
 
     async function loadData() {
       const res = await fetch('data/latest.json?nocache=' + Date.now());
@@ -161,16 +391,25 @@
         groups.get(m).push({x, y});
       }
       const out = [];
+      let idx = 0;
       for (const [m, pts] of groups){
+        const color = colorForMode(m, idx);
         pts.sort((a,b)=>a.x-b.x);
         out.push({
-          label:`${from}->${to} (${m})`,
+          label:`${from} -> ${to} (${m})`,
           data:pts,
-          borderWidth:2,
-          pointRadius:3,
+          borderColor:color.line,
+          pointBackgroundColor:color.point,
+          pointHoverBackgroundColor:color.point,
+          pointBorderColor:"#fff",
+          pointHoverRadius:4.5,
+          pointRadius:3.5,
+          borderWidth:2.4,
           tension:0.2,
-          spanGaps:true
+          spanGaps:true,
+          fill:false
         });
+        idx += 1;
       }
       return out;
     }
@@ -221,6 +460,9 @@
 
     (async function init(){
       const rows = await loadData();
+      Chart.defaults.color = axisTick;
+      Chart.defaults.font.family = '"Manrope","Avenir Next","Segoe UI",sans-serif';
+      Chart.defaults.plugins.legend.labels.usePointStyle = true;
 
       // Updated timestamp (max ts in JSON)
       const last = rows.map(r=>new Date(r.ts)).filter(d=>!isNaN(d)).sort((a,b)=>b-a)[0];
@@ -272,10 +514,14 @@
             x:{type:'logarithmic',
                min: datasets.length?Math.min(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):10,
                max: datasets.length?Math.max(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):1_000_000,
-               ticks:{callback:v=>fmtK(v)}, title:{display:true,text:'Source Amount'}},
+               ticks:{color:axisTick, callback:v=>fmtK(v)},
+               grid:{color:axisGrid},
+               title:{display:true,text:'Source Amount',color:axisTick}},
             y:Object.assign(
-              {title:{display:true,text:'Fee (bps)'}},
-              useLog?{type:'logarithmic',min:y0,max:y1}:{type:'linear',min:y0,max:y1,ticks:{callback:v=>nf0.format(v)}}
+              {title:{display:true,text:'Fee (bps)',color:axisTick},grid:{color:axisGrid}},
+              useLog
+                ? {type:'logarithmic',min:y0,max:y1,ticks:{color:axisTick}}
+                : {type:'linear',min:y0,max:y1,ticks:{color:axisTick, callback:v=>nf0.format(v)}}
             )
           }
         };
@@ -321,8 +567,9 @@
         const prio = ["USD","GBP","EUR","CNY","SGD"];
         const ordered = prio.filter(x=>allTargs.includes(x)).concat(allTargs.filter(x=>!prio.includes(x)).sort());
 
-        ordered.forEach(tgt=>{
+        ordered.forEach((tgt, idx)=>{
           const card=document.createElement('div'); card.className='card mini';
+          card.style.animationDelay = `${Math.min(idx * 45, 360)}ms`;
           const title=document.createElement('div'); title.className='title'; title.textContent=`${activeSrc}->${tgt}`;
           const canv=document.createElement('canvas'); canv.height=280;
           card.appendChild(title); card.appendChild(canv); allGrid.appendChild(card);
@@ -340,9 +587,11 @@
               responsive:true, maintainAspectRatio:false, animation:false,
               plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}},
               scales:{
-                x:{type:'logarithmic',ticks:{callback:v=>fmtK(v)}},
+                x:{type:'logarithmic',ticks:{color:axisTick, callback:v=>fmtK(v)},grid:{color:axisGrid}},
                 y:Object.assign({},
-                  useLog?{type:'logarithmic',min:y0,max:y1}:{type:'linear',min:y0,max:y1,ticks:{callback:v=>nf0.format(v)}}
+                  useLog
+                    ? {type:'logarithmic',min:y0,max:y1,ticks:{color:axisTick},grid:{color:axisGrid}}
+                    : {type:'linear',min:y0,max:y1,ticks:{color:axisTick, callback:v=>nf0.format(v)},grid:{color:axisGrid}}
                 )
               }
             }
