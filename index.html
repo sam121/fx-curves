@@ -3,287 +3,604 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Daily Wise FX transfer fee curves across source amounts, currencies, and payment modes." />
+  <meta name="theme-color" content="#f6f8fb" />
   <title>FX Cost Curves</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=IBM+Plex+Mono:wght@500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap');
 
     :root{
-      --bg-a:#eef8ff;
-      --bg-b:#fff7e8;
-      --ink:#16243b;
-      --muted:#5f6c84;
-      --border:#d6e4f0;
-      --surface:rgba(255,255,255,0.92);
-      --surface-strong:#ffffff;
-      --accent:#137f77;
-      --accent-strong:#0f4a88;
-      --accent-soft:#dff4ef;
-      --shadow:0 16px 48px rgba(23,53,92,0.12);
-      --radius:20px;
+      --bg:#f4f7fb;
+      --bg-warm:#fbf5ea;
+      --ink:#142033;
+      --muted:#5e6b7f;
+      --soft:#8290a3;
+      --line:#d9e3ee;
+      --line-strong:#c7d4e2;
+      --surface:#ffffff;
+      --surface-soft:#f8fbff;
+      --teal:#177e75;
+      --teal-dark:#0f5f58;
+      --blue:#285d8f;
+      --blue-dark:#1c426a;
+      --amber:#d8892e;
+      --rose:#b95a51;
+      --shadow:0 18px 45px rgba(29, 45, 70, 0.10);
+      --shadow-soft:0 10px 24px rgba(29, 45, 70, 0.08);
+      --radius:8px;
+      --radius-sm:6px;
+      --pill:999px;
     }
 
     *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
     body{
       margin:0;
       min-height:100vh;
       color:var(--ink);
-      font-family:"Manrope","Avenir Next","Segoe UI",sans-serif;
+      font-family:"Inter","Avenir Next","Segoe UI",sans-serif;
       background:
-        radial-gradient(900px 560px at 8% -8%, #caecff 0%, rgba(202,236,255,0) 56%),
-        radial-gradient(760px 600px at 102% 0%, #ffe6c3 0%, rgba(255,230,195,0) 62%),
-        linear-gradient(145deg, var(--bg-a) 0%, var(--bg-b) 100%);
-      padding:26px clamp(16px, 3vw, 42px) 32px;
+        linear-gradient(135deg, rgba(255,255,255,0.78), rgba(255,255,255,0.14)),
+        linear-gradient(160deg, var(--bg) 0%, var(--bg-warm) 58%, #eef7f4 100%);
     }
     body::before{
       content:"";
       position:fixed;
       inset:0;
+      z-index:-1;
       pointer-events:none;
       background-image:
-        linear-gradient(rgba(255,255,255,0.45) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.45) 1px, transparent 1px);
-      background-size:48px 48px;
-      opacity:0.34;
-      mix-blend-mode:soft-light;
+        linear-gradient(rgba(36,78,118,0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(36,78,118,0.055) 1px, transparent 1px);
+      background-size:44px 44px;
+      mask-image:linear-gradient(to bottom, #000, transparent 82%);
     }
 
-    .app{max-width:1260px;margin:0 auto}
-    .hero{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:14px}
-    h1{
-      margin:0;
-      font-size:clamp(34px, 6vw, 54px);
-      line-height:1.04;
-      letter-spacing:-0.04em;
-      text-wrap:balance;
-    }
-    .muted{color:var(--muted)}
-    .subtitle{margin:10px 0 0;font-size:16px}
+    button,select{font:inherit}
+    button{cursor:pointer}
+    button:disabled{cursor:not-allowed;opacity:.55}
+    [hidden]{display:none !important}
 
-    .controls{
+    .page{
+      width:min(1220px, calc(100% - 32px));
+      margin:0 auto;
+      padding:28px 0 36px;
+    }
+
+    .masthead{
+      max-width:860px;
+      margin-bottom:20px;
+    }
+    .brand-strip{
       display:flex;
       flex-wrap:wrap;
-      align-items:flex-end;
+      align-items:center;
       gap:10px;
-      background:var(--surface);
-      border:1px solid var(--border);
+      color:var(--muted);
+      font-size:.88rem;
+      font-weight:700;
+      margin-bottom:28px;
+    }
+    .brand-mark{
+      color:var(--ink);
+      text-decoration:none;
+      font-weight:800;
+    }
+    .status-dot{
+      width:9px;
+      height:9px;
+      border-radius:50%;
+      background:var(--teal);
+      box-shadow:0 0 0 5px rgba(23,126,117,.12);
+    }
+    .eyebrow{
+      margin:0 0 12px;
+      color:var(--teal-dark);
+      font-size:.78rem;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:0;
+    }
+    h1{
+      max-width:780px;
+      margin:0;
+      font-size:4.15rem;
+      line-height:.98;
+      letter-spacing:0;
+    }
+    .lead{
+      max-width:710px;
+      margin:18px 0 0;
+      color:var(--muted);
+      font-size:1.08rem;
+      line-height:1.65;
+    }
+    .panel-kicker,
+    .kicker{
+      margin:0;
+      color:var(--soft);
+      font-size:.76rem;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:0;
+    }
+
+    .control-panel{
+      margin:0 0 16px;
+      border:1px solid var(--line);
       border-radius:var(--radius);
-      backdrop-filter:blur(8px);
+      background:rgba(255,255,255,.9);
       box-shadow:var(--shadow);
       padding:14px;
-      margin:14px 0 20px;
+      backdrop-filter:blur(14px);
     }
-    .field{display:flex;flex-direction:column;gap:6px;min-width:130px}
-    .field label{font-size:12px;font-weight:700;color:var(--muted);letter-spacing:.03em;text-transform:uppercase}
-    .sep{width:1px;align-self:stretch;background:var(--border);margin:0 6px}
-    select,button{
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:#fff;
+    .control-grid{
+      display:grid;
+      grid-template-columns:minmax(135px, 1fr) 44px minmax(135px, 1fr) minmax(165px, .72fr) minmax(140px, .58fr) auto;
+      gap:10px;
+      align-items:end;
+    }
+    .field{
+      display:flex;
+      flex-direction:column;
+      gap:7px;
+      min-width:0;
+    }
+    .field label{
+      color:var(--muted);
+      font-size:.75rem;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:0;
+    }
+    select,
+    .download-btn,
+    .icon-btn{
+      min-height:44px;
+      border:1px solid var(--line-strong);
+      border-radius:var(--radius-sm);
+      background:var(--surface);
       color:var(--ink);
-      font-family:inherit;
-      font-weight:700;
-      font-size:14px;
-      padding:10px 12px;
-      transition:border-color .2s ease, box-shadow .2s ease, transform .2s ease, background-color .2s ease;
+      font-weight:800;
+      transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease, background-color .18s ease;
     }
-    select{min-height:42px}
-    button{cursor:pointer}
-    select:focus-visible,button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 4px rgba(19,127,119,0.18)}
-    button:hover{transform:translateY(-1px)}
-    .btn{background:var(--accent-soft)}
-    .btn:hover{background:#d0eee7}
-    #swap{
-      align-self:flex-end;
-      width:42px;
-      height:42px;
-      border-radius:50%;
+    select{
+      width:100%;
+      padding:0 14px;
+      appearance:auto;
+    }
+    select:focus-visible,
+    button:focus-visible{
+      outline:none;
+      border-color:var(--teal);
+      box-shadow:0 0 0 4px rgba(23,126,117,.16);
+    }
+    .icon-btn{
+      width:44px;
       padding:0;
-      font-size:16px;
-      background:var(--surface-strong);
+      color:var(--teal-dark);
+      background:#edf8f6;
+      font-size:1.15rem;
     }
-    .metrics{display:flex;align-items:center;gap:10px;margin-left:auto}
-    #badge{
+    .download-btn{
+      padding:0 16px;
+      color:#fff;
+      background:linear-gradient(135deg, var(--teal), var(--blue));
+      border-color:transparent;
+      white-space:nowrap;
+      box-shadow:0 12px 20px rgba(32,92,120,.18);
+    }
+    .download-btn:hover,
+    .icon-btn:hover{
+      transform:translateY(-1px);
+    }
+    .data-chip{
       display:inline-flex;
       align-items:center;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:rgba(255,255,255,0.78);
-      padding:8px 12px;
-      font-size:13px;
+      justify-content:center;
+      min-height:44px;
+      padding:0 14px;
+      border:1px solid var(--line);
+      border-radius:var(--pill);
+      color:var(--muted);
+      background:#fbfdff;
+      font-size:.86rem;
+      font-weight:800;
       white-space:nowrap;
+    }
+    .actions{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      justify-content:flex-end;
     }
 
     .tabs{
       display:flex;
-      gap:8px;
+      gap:4px;
       width:max-content;
       max-width:100%;
-      margin:0 0 14px;
-      padding:6px;
-      background:rgba(255,255,255,0.82);
-      border:1px solid var(--border);
-      border-radius:14px;
-      backdrop-filter:blur(6px);
+      margin:16px 0;
+      padding:5px;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      background:rgba(255,255,255,.76);
+      box-shadow:var(--shadow-soft);
     }
     .tabbtn{
-      padding:8px 14px;
-      border-radius:10px;
-      border-color:transparent;
-      background:transparent;
+      min-width:150px;
+      min-height:42px;
+      border:0;
+      border-radius:var(--radius-sm);
       color:var(--muted);
+      background:transparent;
+      font-weight:800;
     }
     .tabbtn.active{
-      background:linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
       color:#fff;
-      box-shadow:0 10px 20px rgba(15,74,136,0.2);
+      background:linear-gradient(135deg, var(--teal), var(--blue-dark));
+      box-shadow:0 12px 20px rgba(32,92,120,.18);
     }
 
-    .card{
-      background:var(--surface);
-      border:1px solid var(--border);
+    .panel-card{
+      border:1px solid var(--line);
       border-radius:var(--radius);
-      padding:18px;
+      background:rgba(255,255,255,.9);
       box-shadow:var(--shadow);
-      margin-bottom:20px;
-      backdrop-filter:blur(8px);
-      animation:rise .44s ease both;
+      backdrop-filter:blur(14px);
     }
+    .chart-panel{
+      padding:18px;
+    }
+    .section-heading{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:18px;
+      margin-bottom:16px;
+    }
+    h2,
     .title{
-      font-size:clamp(21px, 3.4vw, 31px);
+      margin:4px 0 0;
+      font-size:1.65rem;
       line-height:1.2;
-      letter-spacing:-0.025em;
-      font-weight:800;
-      margin:4px 0 14px;
+      letter-spacing:0;
     }
-    .mini .title{font-size:20px}
-    canvas{width:100% !important;height:420px !important}
-
+    .pair-meta{
+      margin:7px 0 0;
+      color:var(--muted);
+      font-size:.94rem;
+      line-height:1.55;
+    }
+    .stat-chips{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+    }
+    .stat-chip{
+      display:inline-flex;
+      align-items:center;
+      min-height:34px;
+      padding:0 11px;
+      border:1px solid var(--line);
+      border-radius:var(--pill);
+      color:var(--blue-dark);
+      background:var(--surface-soft);
+      font-size:.82rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .chart-wrap{
+      position:relative;
+      min-height:430px;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,.94), rgba(248,251,255,.92)),
+        repeating-linear-gradient(90deg, transparent 0, transparent 74px, rgba(40,93,143,.04) 75px);
+      padding:14px;
+      overflow:hidden;
+    }
+    canvas{
+      display:block;
+      width:100% !important;
+      height:400px !important;
+    }
+    .empty-state{
+      position:absolute;
+      inset:14px;
+      display:grid;
+      place-items:center;
+      border:1px dashed var(--line-strong);
+      border-radius:var(--radius-sm);
+      color:var(--muted);
+      background:rgba(255,255,255,.82);
+      font-weight:800;
+      text-align:center;
+      padding:20px;
+    }
     .table-wrap{
       margin-top:16px;
-      border:1px solid var(--border);
-      border-radius:14px;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
       overflow:auto;
-      background:var(--surface-strong);
+      background:var(--surface);
     }
     table{
       width:100%;
+      min-width:760px;
       border-collapse:collapse;
-      font-size:13px;
-      min-width:700px;
+      font-size:.82rem;
     }
     thead th{
       position:sticky;
       top:0;
-      background:#f5fbff;
-      border-bottom:1px solid var(--border);
+      z-index:1;
+      padding:12px 10px;
+      border-bottom:1px solid var(--line);
+      color:var(--muted);
+      background:#f2f7fb;
       text-align:left;
-      padding:10px 9px;
-      font-size:12px;
       text-transform:uppercase;
-      letter-spacing:.03em;
-      color:#526480;
+      font-size:.73rem;
+      font-weight:800;
+      letter-spacing:0;
     }
     tbody td{
-      border-bottom:1px solid #edf2f8;
-      padding:9px;
-      font-variant-numeric:tabular-nums;
+      padding:12px 10px;
+      border-bottom:1px solid #edf2f7;
+      color:#1a2739;
       font-family:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
-      font-size:12px;
+      font-size:.78rem;
+      font-weight:600;
+      font-variant-numeric:tabular-nums;
+      white-space:nowrap;
     }
-    tbody tr:nth-child(even){background:#fcfeff}
+    tbody tr:nth-child(even){background:#fbfdff}
+    tbody tr:hover{background:#f3faf8}
     .right{text-align:right}
 
-    .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-    @media (min-width:1120px){.grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
-    .mini canvas{height:280px !important}
-    .pillrow{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 14px}
-    .pill{
-      padding:7px 12px;
-      border:1px solid var(--border);
-      border-radius:999px;
-      background:#fff;
-      font-size:13px;
+    .all-view{
+      margin-top:4px;
+    }
+    .compare-view{
+      margin-top:4px;
+    }
+    .all-header{
+      display:flex;
+      justify-content:space-between;
+      gap:20px;
+      align-items:flex-end;
+      margin:0 0 14px;
+    }
+    .pillrow{
+      display:flex;
+      flex-wrap:wrap;
+      justify-content:flex-end;
+      gap:8px;
+    }
+    .source-pill{
+      min-height:34px;
+      padding:0 12px;
+      border:1px solid var(--line);
+      border-radius:var(--pill);
+      background:rgba(255,255,255,.82);
+      color:var(--muted);
+      font-size:.82rem;
       font-weight:800;
     }
-    .pill.active{
-      background:var(--accent);
-      border-color:var(--accent);
+    .source-pill.active{
       color:#fff;
+      background:var(--teal);
+      border-color:var(--teal);
+    }
+    .source-pill:disabled{
+      color:#9aa6b6;
+      background:#f3f6f9;
+      border-color:#dfe7ef;
+      cursor:not-allowed;
+    }
+    .compare-pills{
+      justify-content:flex-start;
+      margin:0 0 14px;
+    }
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(3, minmax(0, 1fr));
+      gap:14px;
+    }
+    .mini{
+      padding:14px;
+    }
+    .mini-head{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:baseline;
+      margin-bottom:10px;
+    }
+    .mini .title{
+      font-size:1rem;
+      font-weight:800;
+    }
+    .mini-count{
+      color:var(--soft);
+      font-size:.74rem;
+      font-weight:800;
+      white-space:nowrap;
+    }
+    .mini .chart-wrap{
+      min-height:242px;
+      padding:8px;
+    }
+    .mini canvas{height:224px !important}
+
+    .site-footer{
+      margin-top:22px;
+      color:var(--muted);
+      font-size:.86rem;
+      line-height:1.6;
+    }
+    .site-footer strong{color:var(--ink)}
+    .error-panel{
+      margin-top:18px;
+      padding:18px;
+      border:1px solid #efc8c4;
+      border-radius:var(--radius);
+      color:#74312b;
+      background:#fff7f6;
+      font-weight:700;
     }
 
-    @media (max-width:760px){
-      .controls{padding:12px}
-      .field{min-width:calc(50% - 8px)}
-      .sep{display:none}
-      #swap{order:3}
-      .metrics{margin-left:0;width:100%;justify-content:space-between}
+    @media (max-width:1040px){
+      h1{font-size:3.35rem}
+      .control-grid{
+        grid-template-columns:1fr 44px 1fr;
+      }
+      .field.mode-field,
+      .field.scale-field,
+      .actions{
+        grid-column:span 3;
+      }
+      .actions{justify-content:flex-start}
+      .grid{grid-template-columns:repeat(2, minmax(0, 1fr))}
+    }
+
+    @media (max-width:720px){
+      .page{
+        width:min(100% - 24px, 1220px);
+        padding-top:22px;
+      }
+      .brand-strip{margin-bottom:24px}
+      h1{font-size:2.55rem}
+      .lead{font-size:1rem}
+      .control-grid{
+        grid-template-columns:1fr 1fr;
+      }
+      #swap{
+        grid-column:1 / -1;
+        width:100%;
+      }
+      .field.mode-field,
+      .field.scale-field,
+      .actions{
+        grid-column:auto;
+      }
+      .actions{
+        grid-column:1 / -1;
+        flex-wrap:wrap;
+      }
+      .data-chip{flex:1 1 170px}
+      .download-btn{flex:1 1 150px}
       .tabs{width:100%}
-      .tabbtn{flex:1}
+      .tabbtn{flex:1;min-width:0}
+      .section-heading,
+      .all-header{
+        flex-direction:column;
+        align-items:stretch;
+      }
+      .stat-chips,
+      .pillrow{justify-content:flex-start}
+      .chart-panel{padding:14px}
+      .chart-wrap{min-height:360px}
+      canvas{height:330px !important}
       .grid{grid-template-columns:1fr}
     }
 
-    @keyframes rise{
-      from{opacity:0;transform:translateY(12px)}
-      to{opacity:1;transform:translateY(0)}
+    @media (max-width:460px){
+      h1{font-size:2.18rem}
+      .control-grid{grid-template-columns:1fr}
+      .field.mode-field,
+      .field.scale-field,
+      .actions,
+      #swap{
+        grid-column:auto;
+      }
     }
   </style>
 </head>
 <body>
-  <main class="app">
-    <header class="hero">
+  <main class="page">
+    <header class="masthead">
       <div>
-        <h1>FX Cost Curves <span id="updated" class="muted" style="font-size:16px"></span></h1>
-        <p class="subtitle muted">Daily Wise quotes. Y-axis is <b>fee (bps)</b>. X-axis is source amount.</p>
+        <div class="brand-strip">
+          <a class="brand-mark" href="./">FX Cost Curves</a>
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="updated">Loading latest snapshot</span>
+        </div>
+
+        <p class="eyebrow">Wise transfer fee curves</p>
+        <h1>Compare FX fees across transfer sizes.</h1>
+        <p class="lead">Daily Wise quote samples showing the total fee in basis points against the mid-market outcome, across currencies and payment modes.</p>
       </div>
     </header>
 
-    <div class="controls">
-      <div class="field">
-        <label for="from">From</label>
-        <select id="from"></select>
-      </div>
-      <button id="swap" class="btn" title="Swap">⇆</button>
-      <div class="field">
-        <label for="to">To</label>
-        <select id="to"></select>
-      </div>
+    <section class="control-panel" aria-label="Chart controls">
+      <div class="control-grid">
+        <div class="field">
+          <label for="from">From</label>
+          <select id="from"></select>
+        </div>
 
-      <div class="sep" aria-hidden="true"></div>
+        <button id="swap" class="icon-btn" type="button" title="Swap currencies" aria-label="Swap currencies">⇄</button>
 
-      <div class="field">
-        <label for="mode">Mode</label>
-        <select id="mode">
-          <option value="BALANCE" selected>BALANCE</option>
-          <option value="BANK_TRANSFER">BANK_TRANSFER</option>
-          <option value="ALL">ALL</option>
-        </select>
+        <div class="field">
+          <label for="to">To</label>
+          <select id="to"></select>
+        </div>
+
+        <div class="field mode-field">
+          <label for="mode">Mode</label>
+          <select id="mode">
+            <option value="BALANCE" selected>Balance</option>
+            <option value="BANK_TRANSFER">Bank transfer</option>
+            <option value="ALL">All modes</option>
+          </select>
+        </div>
+
+        <div class="field scale-field">
+          <label for="yscale">Y scale</label>
+          <select id="yscale">
+            <option value="auto" selected>Auto</option>
+            <option value="linear">Linear</option>
+            <option value="log">Log</option>
+          </select>
+        </div>
+
+        <div class="actions">
+          <span id="badge" class="data-chip">Loading</span>
+          <button id="download" class="download-btn" type="button">Download CSV</button>
+        </div>
       </div>
-      <div class="field">
-        <label for="yscale">Y scale</label>
-        <select id="yscale">
-          <option value="auto" selected>Auto</option>
-          <option value="linear">Linear</option>
-          <option value="log">Log</option>
-        </select>
-      </div>
+    </section>
 
-      <div class="metrics">
-        <span id="badge" class="muted"></span>
-        <button id="download" class="btn">Download CSV</button>
-      </div>
-    </div>
+    <nav class="tabs" aria-label="Views">
+      <button class="tabbtn active" type="button" role="tab" aria-selected="true" data-tab="single">Single Pair</button>
+      <button class="tabbtn" type="button" role="tab" aria-selected="false" data-tab="all">All From Source</button>
+      <button class="tabbtn" type="button" role="tab" aria-selected="false" data-tab="compare">Corridor Compare</button>
+    </nav>
 
-    <div class="tabs">
-      <button class="tabbtn active" data-tab="single">Single Pair</button>
-      <button class="tabbtn" data-tab="all">All From Source</button>
-    </div>
+    <section id="tab-single">
+      <article class="panel-card chart-panel">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">Selected pair</p>
+            <h2 id="title">Loading chart</h2>
+            <p id="pair-meta" class="pair-meta">Source amount on a log scale. Fee shown in basis points.</p>
+          </div>
+          <div class="stat-chips">
+            <span id="best-fee" class="stat-chip">--</span>
+            <span id="table-count" class="stat-chip">--</span>
+          </div>
+        </div>
 
-    <!-- Single pair -->
-    <div id="tab-single">
-      <div class="card">
-        <div id="title" class="title"></div>
-        <canvas id="chart"></canvas>
+        <div class="chart-wrap">
+          <canvas id="chart" aria-label="Fee curve chart" role="img"></canvas>
+          <div id="empty-state" class="empty-state" hidden>No quotes available for this selection.</div>
+        </div>
+
         <div class="table-wrap">
           <table id="table">
             <thead>
@@ -300,114 +617,191 @@
             <tbody></tbody>
           </table>
         </div>
-      </div>
-    </div>
+      </article>
+    </section>
 
-    <!-- All pairs from a source (small multiples) -->
-    <div id="tab-all" style="display:none">
-      <div class="card">
-        <div class="title">All pairs from <span id="all-src">USD</span> (<span id="all-mode">BALANCE</span>)</div>
-        <div class="pillrow" id="src-pills"></div>
-        <div class="grid" id="all-grid"></div>
+    <section id="tab-all" class="all-view" hidden>
+      <div class="all-header">
+        <div>
+          <p class="kicker">Small multiples</p>
+          <h2 class="title">All pairs from <span id="all-src">--</span> <span id="all-mode">--</span></h2>
+        </div>
+        <div class="pillrow" id="src-pills" aria-label="Source currencies"></div>
       </div>
-    </div>
+      <div class="grid" id="all-grid"></div>
+    </section>
+
+    <section id="tab-compare" class="compare-view" hidden>
+      <article class="panel-card chart-panel">
+        <div class="section-heading">
+          <div>
+            <p class="kicker">Corridor comparison</p>
+            <h2 id="compare-title">Costs into USD</h2>
+            <p id="compare-meta" class="pair-meta">Compare selected source currencies into the same target currency, normalized by approximate USD notional.</p>
+          </div>
+          <div class="stat-chips">
+            <span id="compare-lowest" class="stat-chip">--</span>
+            <span id="compare-count" class="stat-chip">--</span>
+          </div>
+        </div>
+
+        <div class="pillrow compare-pills" id="compare-source-pills" aria-label="Comparison source currencies"></div>
+
+        <div class="chart-wrap">
+          <canvas id="compare-chart" aria-label="Multi-currency corridor cost comparison chart" role="img"></canvas>
+          <div id="compare-empty" class="empty-state" hidden>No comparison data available for this target yet.</div>
+        </div>
+      </article>
+    </section>
+
+    <footer class="site-footer">
+      <strong>Data note:</strong> fees are shown in basis points versus the mid-market outcome. Quotes are sampled from Wise and can vary by availability, amount, currency, and payment method.
+    </footer>
   </main>
 
   <script>
-    // ---------- helpers ----------
-    const nf0 = new Intl.NumberFormat(undefined, {maximumFractionDigits:0});
-    const nf2 = new Intl.NumberFormat(undefined, {maximumFractionDigits:2});
-    const nf4 = new Intl.NumberFormat(undefined, {maximumFractionDigits:4});
-    const nf6 = new Intl.NumberFormat(undefined, {maximumFractionDigits:6});
+    const nf0 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+    const nf2 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+    const nf4 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+    const nf6 = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
 
     const fmtK = n => {
       const x = Number(n);
-      if (!isFinite(x)) return String(n);
-      if (x >= 1_000_000) return (x/1_000_000).toFixed(0) + "M";
-      if (x >= 1000) return (x/1000).toFixed(0) + "k";
+      if (!Number.isFinite(x)) return String(n);
+      if (x >= 1_000_000) return `${Number((x / 1_000_000).toFixed(1))}M`;
+      if (x >= 1000) return `${Number((x / 1000).toFixed(1))}k`;
       return String(x);
     };
+
+    const modeLabel = mode => String(mode || "BALANCE").replaceAll("_", " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    const currencyOf = (row, side) => side === "src" ? (row.src ?? row.sourceCurrency) : (row.tgt ?? row.targetCurrency);
+    const modeOf = row => row.mode ?? row.payOut ?? "BALANCE";
+    const TRACKED_CURRENCIES = ["USD", "GBP", "EUR", "CNY", "SGD", "MYR", "IDR", "AUD", "ARS", "BRL", "CAD", "INR", "JPY", "KRW", "MXN", "TRY"];
+    const TRACKED_SET = new Set(TRACKED_CURRENCIES);
+    const isTrackedCurrency = currency => TRACKED_SET.has(String(currency || ""));
+
     const paletteByMode = {
-      BALANCE: {line:"#137f77", point:"#0f6b63"},
-      BANK_TRANSFER: {line:"#0f4a88", point:"#0d3e72"}
+      BALANCE: { line: "#177e75", point: "#0f5f58" },
+      BANK_TRANSFER: { line: "#285d8f", point: "#1c426a" }
     };
     const fallbackPalette = [
-      {line:"#d56f1a", point:"#b85d0d"},
-      {line:"#b64f3c", point:"#9c3f2e"},
-      {line:"#3d8ece", point:"#2b77b2"}
+      { line: "#d8892e", point: "#ac6517" },
+      { line: "#b95a51", point: "#8d3f39" },
+      { line: "#5c6f8f", point: "#405572" }
     ];
-    const axisGrid = "rgba(42,86,139,0.12)";
-    const axisTick = "#5a6f8f";
+    const seriesPalette = [
+      "#177e75", "#285d8f", "#d8892e", "#b95a51", "#6859a9", "#2f7f9d",
+      "#7d8a2f", "#b45f86", "#536476", "#0f5f58", "#1c426a", "#ac6517"
+    ];
+    const axisGrid = "rgba(40, 93, 143, 0.12)";
+    const axisTick = "#5e6b7f";
 
     function colorForMode(mode, index){
-      if (paletteByMode[mode]) return paletteByMode[mode];
-      return fallbackPalette[index % fallbackPalette.length];
+      return paletteByMode[mode] || fallbackPalette[index % fallbackPalette.length];
     }
 
-    async function loadData() {
-      const res = await fetch('data/latest.json?nocache=' + Date.now());
-      if (!res.ok) throw new Error('Failed to load data/latest.json');
+    function colorForSeries(index){
+      const line = seriesPalette[index % seriesPalette.length];
+      return { line, point: line };
+    }
+
+    async function loadData(){
+      const res = await fetch(`data/latest.json?nocache=${Date.now()}`);
+      if (!res.ok) throw new Error("Failed to load data/latest.json");
       return res.json();
     }
 
-    const yVal = d => {
-      const y = d.fee_bps ?? d.bps ?? d.bps_vs_mid ?? d.y;
+    const yVal = row => {
+      const y = row.fee_bps ?? row.bps ?? row.bps_vs_mid ?? row.y;
       const v = Number(y);
-      return Number.isFinite(v) && v > 0 ? v : null; // exclude 0/NaN for log safety
+      return Number.isFinite(v) && v > 0 ? v : null;
     };
-    const xVal = d => {
-      const x = d.amount ?? d.sourceAmount ?? d.x;
+    const xVal = row => {
+      const x = row.amount ?? row.sourceAmount ?? row.x;
       const v = Number(x);
       return Number.isFinite(v) ? v : null;
     };
 
     function uniqueSortedCurrencies(rows){
-      const s = new Set();
-      for (const r of rows){
-        s.add(String(r.src ?? r.sourceCurrency));
-        s.add(String(r.tgt ?? r.targetCurrency));
+      const set = new Set();
+      for (const row of rows){
+        const src = currencyOf(row, "src");
+        const tgt = currencyOf(row, "tgt");
+        if (src) set.add(String(src));
+        if (tgt) set.add(String(tgt));
       }
-      const all = Array.from(s).filter(Boolean);
-      const prio = ["USD","GBP","EUR","CNY","SGD"];
-      const rest = all.filter(c => !prio.includes(c)).sort();
-      return prio.filter(c=>all.includes(c)).concat(rest);
+      return TRACKED_CURRENCIES.filter(currency => set.has(currency) || currency === "MYR");
+    }
+
+    function summarizeRows(rows){
+      const currencies = new Set();
+      const pairs = new Set();
+      const modes = new Set();
+      const dates = [];
+      for (const row of rows){
+        const src = currencyOf(row, "src");
+        const tgt = currencyOf(row, "tgt");
+        if (src) currencies.add(src);
+        if (tgt) currencies.add(tgt);
+        if (src && tgt) pairs.add(`${src}->${tgt}`);
+        modes.add(modeOf(row));
+        const d = new Date(row.ts);
+        if (!Number.isNaN(d.valueOf())) dates.push(d);
+      }
+      dates.sort((a, b) => b - a);
+      return { currencies, pairs, modes, latest: dates[0] };
+    }
+
+    function formatUtc(date){
+      if (!date) return "Unknown";
+      return new Intl.DateTimeFormat(undefined, {
+        timeZone: "UTC",
+        year: "numeric",
+        month: "short",
+        day: "numeric"
+      }).format(date);
     }
 
     function filterPair(rows, from, to){
-      return rows.filter(r => (r.src ?? r.sourceCurrency)===from && (r.tgt ?? r.targetCurrency)===to);
-    }
-    function filterFrom(rows, from){
-      return rows.filter(r => (r.src ?? r.sourceCurrency)===from);
+      return rows.filter(row => currencyOf(row, "src") === from && currencyOf(row, "tgt") === to);
     }
 
-    function buildDatasets(items, modeSel, from, to){
+    function filterFrom(rows, from){
+      return rows.filter(row => currencyOf(row, "src") === from);
+    }
+
+    function buildDatasets(items, modeSel){
       const groups = new Map();
-      for (const r of items){
-        const m = r.mode ?? r.payOut ?? 'BALANCE';
-        if (modeSel !== 'ALL' && m !== modeSel) continue;
-        const x = xVal(r), y = yVal(r);
+      for (const row of items){
+        const mode = modeOf(row);
+        if (modeSel !== "ALL" && mode !== modeSel) continue;
+        const x = xVal(row);
+        const y = yVal(row);
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-        if (!groups.has(m)) groups.set(m, []);
-        groups.get(m).push({x, y});
+        if (!groups.has(mode)) groups.set(mode, []);
+        groups.get(mode).push({ x, y });
       }
+
       const out = [];
       let idx = 0;
-      for (const [m, pts] of groups){
-        const color = colorForMode(m, idx);
-        pts.sort((a,b)=>a.x-b.x);
+      for (const [mode, points] of groups){
+        const color = colorForMode(mode, idx);
+        points.sort((a, b) => a.x - b.x);
         out.push({
-          label:`${from} -> ${to} (${m})`,
-          data:pts,
-          borderColor:color.line,
-          pointBackgroundColor:color.point,
-          pointHoverBackgroundColor:color.point,
-          pointBorderColor:"#fff",
-          pointHoverRadius:4.5,
-          pointRadius:3.5,
-          borderWidth:2.4,
-          tension:0.2,
-          spanGaps:true,
-          fill:false
+          label: modeLabel(mode),
+          data: points,
+          borderColor: color.line,
+          pointBackgroundColor: color.point,
+          pointHoverBackgroundColor: color.point,
+          pointBorderColor: "#fff",
+          pointRadius: 3.2,
+          pointHoverRadius: 5,
+          pointBorderWidth: 1.5,
+          hitRadius: 10,
+          borderWidth: 2.6,
+          tension: 0.28,
+          spanGaps: true,
+          fill: false
         });
         idx += 1;
       }
@@ -415,194 +809,575 @@
     }
 
     function yStats(datasets){
-      const ys=[]; datasets.forEach(ds=>ds.data.forEach(p=>ys.push(p.y)));
-      if (!ys.length) return {min:0,max:1};
-      return {min:Math.min(...ys), max:Math.max(...ys)};
+      const ys = [];
+      datasets.forEach(ds => ds.data.forEach(point => ys.push(point.y)));
+      if (!ys.length) return { min: 0, max: 1, values: [] };
+      return { min: Math.min(...ys), max: Math.max(...ys), values: ys };
     }
-    function linearDomain(min,max){
-      const span=max-min; let pad=Math.max(span*0.18,2); if(span<8) pad=Math.max(pad,4);
-      let y0=Math.max(0, min-pad), y1=max+pad;
-      y0=Math.floor(y0/5)*5; y1=Math.ceil(y1/5)*5; if(y1<=y0) y1=y0+5;
-      return {y0,y1};
-    }
-    function logDomain(min,max){ return {y0:Math.max(0.1, min*0.85), y1:max*1.2}; }
 
-    function attachTable(rows, from, to, modeSel){
-      const body=document.querySelector('#table tbody'); body.innerHTML='';
-      const items = rows.filter(r=>{
-        const src=r.src??r.sourceCurrency, tgt=r.tgt??r.targetCurrency, m=r.mode??r.payOut??'BALANCE';
-        if(src!==from||tgt!==to) return false;
-        if(modeSel!=='ALL'&&m!==modeSel) return false;
-        return Number.isFinite(xVal(r)) && Number.isFinite(yVal(r));
-      }).sort((a,b)=>(a.amount-b.amount)||String((a.mode??a.payOut)).localeCompare(String((b.mode??b.payOut))));
-      for(const r of items){
-        const tr=document.createElement('tr');
-        const m=r.mode??r.payOut??'BALANCE';
-        const cells=[m, nf0.format(r.amount??r.sourceAmount), nf2.format(yVal(r)),
-          (r.fee_total!=null?nf4.format(+r.fee_total):''), (r.rate!=null?nf6.format(+r.rate):''),
-          (r.targetAmount!=null?nf4.format(+r.targetAmount):''), (r.rounding_bps!=null?nf2.format(+r.rounding_bps):'')];
-        cells.forEach((v,i)=>{const td=document.createElement('td'); td.textContent=v; if(i>0) td.className='right'; tr.appendChild(td);});
-        body.appendChild(tr);
-      }
-      document.getElementById('download').onclick=()=>{
-        const header=['mode','amount_src','fee_bps','fee_src','rate','target_tgt','rounding_bps'];
-        const lines=[header.join(',')];
-        for(const r of items){
-          lines.push([(r.mode??r.payOut??'BALANCE'), (r.amount??r.sourceAmount),
-            (yVal(r)?.toFixed(4)??''), (r.fee_total??''), (r.rate??''), (r.targetAmount??''), (r.rounding_bps??'')].join(','));
+    function linearDomain(min, max){
+      const span = max - min;
+      let pad = Math.max(span * 0.18, 2);
+      if (span < 8) pad = Math.max(pad, 4);
+      let y0 = Math.max(0, min - pad);
+      let y1 = max + pad;
+      y0 = Math.floor(y0 / 5) * 5;
+      y1 = Math.ceil(y1 / 5) * 5;
+      if (y1 <= y0) y1 = y0 + 5;
+      return { y0, y1 };
+    }
+
+    function logDomain(min, max){
+      return { y0: Math.max(0.1, min * 0.85), y1: Math.max(1, max * 1.2) };
+    }
+
+    function chartOptions(datasets, scaleSel, xTitle = "Source amount", xUnit = "source"){
+      const { min, max } = yStats(datasets);
+      const useLog = (scaleSel === "log") || (scaleSel === "auto" && max && (max > 500 || (min > 0 && (max / min) > 50)));
+      const { y0, y1 } = useLog ? logDomain(min || 0.1, max || 1) : linearDomain(min || 0, max || 1);
+      const xs = datasets.flatMap(ds => ds.data.map(point => point.x));
+
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "nearest", intersect: false },
+        layout: { padding: { top: 4, right: 8, bottom: 0, left: 4 } },
+        plugins: {
+          legend: {
+            position: "top",
+            align: "end",
+            labels: {
+              boxWidth: 9,
+              boxHeight: 9,
+              color: axisTick,
+              padding: 16,
+              usePointStyle: true
+            }
+          },
+          tooltip: {
+            backgroundColor: "#142033",
+            borderColor: "rgba(255,255,255,.18)",
+            borderWidth: 1,
+            padding: 12,
+            titleColor: "#fff",
+            bodyColor: "#e8eef6",
+            displayColors: true,
+            callbacks: {
+              label: c => `${c.dataset.label}: ${nf0.format(c.parsed.x)} ${xUnit} / ${nf2.format(c.parsed.y)} bps`
+            }
+          }
+        },
+        scales: {
+          x: {
+            type: "logarithmic",
+            min: xs.length ? Math.min(...xs) : 10,
+            max: xs.length ? Math.max(...xs) : 1_000_000,
+            ticks: { color: axisTick, callback: v => fmtK(v), maxRotation: 0 },
+            grid: { color: axisGrid },
+            border: { color: "rgba(40, 93, 143, 0.18)" },
+            title: { display: true, text: xTitle, color: axisTick, font: { weight: 700 } }
+          },
+          y: Object.assign(
+            {
+              title: { display: true, text: "Fee (bps)", color: axisTick, font: { weight: 700 } },
+              grid: { color: axisGrid },
+              border: { color: "rgba(40, 93, 143, 0.18)" }
+            },
+            useLog
+              ? { type: "logarithmic", min: y0, max: y1, ticks: { color: axisTick } }
+              : { type: "linear", min: y0, max: y1, ticks: { color: axisTick, callback: v => nf0.format(v) } }
+          )
         }
-        const blob=new Blob([lines.join('\n')],{type:'text/csv'});
-        const url=URL.createObjectURL(blob); const a=document.createElement('a');
-        a.href=url; a.download=`${from}-${to}-${(modeSel==='ALL'?'ALL':modeSel)}.csv`;
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
       };
     }
 
+    function inferUsdRates(rows){
+      const rates = new Map([["USD", 1]]);
+      for (const row of rows){
+        const src = currencyOf(row, "src");
+        const tgt = currencyOf(row, "tgt");
+        const rate = Number(row.rate);
+        if (tgt === "USD" && src && Number.isFinite(rate) && rate > 0 && !rates.has(src)){
+          rates.set(src, rate);
+        }
+      }
+      return rates;
+    }
+
+    function xUsdVal(row, usdRates){
+      const src = currencyOf(row, "src");
+      const rate = usdRates.get(src);
+      const amount = xVal(row);
+      if (!Number.isFinite(amount) || !Number.isFinite(rate)) return null;
+      return amount * rate;
+    }
+
+    function buildCorridorDatasets(rows, sources, target, modeSel, usdRates){
+      const groups = new Map();
+      const sourceSet = new Set(sources);
+      for (const row of rows){
+        const src = currencyOf(row, "src");
+        const tgt = currencyOf(row, "tgt");
+        const mode = modeOf(row);
+        if (!sourceSet.has(src) || src === target || tgt !== target) continue;
+        if (modeSel !== "ALL" && mode !== modeSel) continue;
+
+        const x = xUsdVal(row, usdRates);
+        const y = yVal(row);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+
+        const key = modeSel === "ALL" ? `${src}-${mode}` : src;
+        const label = modeSel === "ALL" ? `${src} ${modeLabel(mode)}` : src;
+        if (!groups.has(key)) groups.set(key, { label, points: [] });
+        groups.get(key).points.push({ x, y });
+      }
+
+      return Array.from(groups.values()).map((group, index) => {
+        const color = colorForSeries(index);
+        group.points.sort((a, b) => a.x - b.x);
+        return {
+          label: group.label,
+          data: group.points,
+          borderColor: color.line,
+          pointBackgroundColor: color.point,
+          pointHoverBackgroundColor: color.point,
+          pointBorderColor: "#fff",
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          pointBorderWidth: 1.5,
+          hitRadius: 10,
+          borderWidth: 2.4,
+          tension: 0.24,
+          spanGaps: true,
+          fill: false
+        };
+      });
+    }
+
+    function attachTable(rows, from, to, modeSel){
+      const body = document.querySelector("#table tbody");
+      const download = document.getElementById("download");
+      body.innerHTML = "";
+
+      const items = rows.filter(row => {
+        const src = currencyOf(row, "src");
+        const tgt = currencyOf(row, "tgt");
+        const mode = modeOf(row);
+        if (src !== from || tgt !== to) return false;
+        if (modeSel !== "ALL" && mode !== modeSel) return false;
+        return Number.isFinite(xVal(row)) && Number.isFinite(yVal(row));
+      }).sort((a, b) => (xVal(a) - xVal(b)) || modeOf(a).localeCompare(modeOf(b)));
+
+      for (const row of items){
+        const tr = document.createElement("tr");
+        const cells = [
+          modeLabel(modeOf(row)),
+          nf0.format(xVal(row)),
+          nf2.format(yVal(row)),
+          row.fee_total != null ? nf4.format(+row.fee_total) : "",
+          row.rate != null ? nf6.format(+row.rate) : "",
+          row.targetAmount != null ? nf4.format(+row.targetAmount) : "",
+          row.rounding_bps != null ? nf2.format(+row.rounding_bps) : ""
+        ];
+        cells.forEach((value, index) => {
+          const td = document.createElement("td");
+          td.textContent = value;
+          if (index > 0) td.className = "right";
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      }
+
+      download.disabled = items.length === 0;
+      download.onclick = () => {
+        if (!items.length) return;
+        const header = ["mode", "amount_src", "fee_bps", "fee_src", "rate", "target_tgt", "rounding_bps"];
+        const lines = [header.join(",")];
+        for (const row of items){
+          lines.push([
+            modeOf(row),
+            xVal(row),
+            yVal(row)?.toFixed(4) ?? "",
+            row.fee_total ?? "",
+            row.rate ?? "",
+            row.targetAmount ?? "",
+            row.rounding_bps ?? ""
+          ].join(","));
+        }
+        const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${from}-${to}-${modeSel === "ALL" ? "ALL" : modeSel}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+
+      return items.length;
+    }
+
     (async function init(){
-      const rows = await loadData();
+      const loadedRows = await loadData();
+      const rows = loadedRows.filter(row => isTrackedCurrency(currencyOf(row, "src")) && isTrackedCurrency(currencyOf(row, "tgt")));
+      const usdRates = inferUsdRates(rows);
       Chart.defaults.color = axisTick;
-      Chart.defaults.font.family = '"Manrope","Avenir Next","Segoe UI",sans-serif';
+      Chart.defaults.font.family = "\"Inter\",\"Avenir Next\",\"Segoe UI\",sans-serif";
       Chart.defaults.plugins.legend.labels.usePointStyle = true;
 
-      // Updated timestamp (max ts in JSON)
-      const last = rows.map(r=>new Date(r.ts)).filter(d=>!isNaN(d)).sort((a,b)=>b-a)[0];
-      if(last){
-        const s = last.toISOString().replace('T',' ').replace('Z',' UTC');
-        document.getElementById('updated').textContent = `· Updated ${s}`;
-      }
+      const summary = summarizeRows(rows);
+      document.getElementById("updated").textContent = summary.latest ? `Updated ${formatUtc(summary.latest)}` : "Snapshot loaded";
 
-      const fromEl=document.getElementById('from');
-      const toEl=document.getElementById('to');
-      const modeEl=document.getElementById('mode');
-      const yscaleEl=document.getElementById('yscale');
-      const swapBtn=document.getElementById('swap');
-      const titleEl=document.getElementById('title');
-      const badgeEl=document.getElementById('badge');
+      const fromEl = document.getElementById("from");
+      const toEl = document.getElementById("to");
+      const modeEl = document.getElementById("mode");
+      const yscaleEl = document.getElementById("yscale");
+      const swapBtn = document.getElementById("swap");
+      const titleEl = document.getElementById("title");
+      const pairMetaEl = document.getElementById("pair-meta");
+      const badgeEl = document.getElementById("badge");
+      const bestFeeEl = document.getElementById("best-fee");
+      const tableCountEl = document.getElementById("table-count");
+      const emptyState = document.getElementById("empty-state");
+      const compareTitleEl = document.getElementById("compare-title");
+      const compareMetaEl = document.getElementById("compare-meta");
+      const compareLowestEl = document.getElementById("compare-lowest");
+      const compareCountEl = document.getElementById("compare-count");
+      const compareEmptyEl = document.getElementById("compare-empty");
 
-      // currencies (priority order)
       const curList = uniqueSortedCurrencies(rows);
-      for (const c of curList){
-        const o1=document.createElement('option'); o1.value=o1.textContent=c; fromEl.appendChild(o1);
-        const o2=document.createElement('option'); o2.value=o2.textContent=c; toEl.appendChild(o2);
-      }
-      fromEl.value=curList.includes('GBP')?'GBP':curList[0];
-      toEl.value=curList.includes('USD')?'USD':(curList.find(x=>x!==fromEl.value)||curList[1]);
+      for (const currency of curList){
+        const fromOption = document.createElement("option");
+        fromOption.value = currency;
+        fromOption.textContent = currency;
+        fromEl.appendChild(fromOption);
 
-      // ---------- Single chart ----------
-      const ctx=document.getElementById('chart').getContext('2d'); let chart=null;
+        const toOption = document.createElement("option");
+        toOption.value = currency;
+        toOption.textContent = currency;
+        toEl.appendChild(toOption);
+      }
+      fromEl.value = curList.includes("GBP") ? "GBP" : curList[0];
+      toEl.value = curList.includes("USD") ? "USD" : (curList.find(currency => currency !== fromEl.value) || curList[1]);
+
+      const ctx = document.getElementById("chart").getContext("2d");
+      const compareCtx = document.getElementById("compare-chart").getContext("2d");
+      let chart = null;
+      let compareChart = null;
+      let allCharts = [];
+      let activeSrc = fromEl.value;
+      let activeCompareSources = null;
 
       function renderSingle(){
-        const from=fromEl.value, to=toEl.value, modeSel=modeEl.value, scaleSel=yscaleEl.value;
-        const items=filterPair(rows, from, to);
-        const datasets=buildDatasets(items, modeSel, from, to);
-        const {min,max}=yStats(datasets);
-        const useLog = (scaleSel==='log') || (scaleSel==='auto' && max && (max>500 || (min>0 && (max/min) > 50)));
-        const {y0,y1} = useLog ? logDomain(min||0.1, max||1) : linearDomain(min||0, max||1);
+        const from = fromEl.value;
+        const to = toEl.value;
+        const modeSel = modeEl.value;
+        const scaleSel = yscaleEl.value;
+        const items = filterPair(rows, from, to);
+        const datasets = buildDatasets(items, modeSel);
+        const pointCount = datasets.reduce((sum, ds) => sum + ds.data.length, 0);
+        const stats = yStats(datasets);
+        const data = { datasets };
+        const options = chartOptions(datasets, scaleSel);
 
-        titleEl.textContent = `${from}->${to} (${modeSel})`;
-        const pointCount = datasets.reduce((s,ds)=>s+ds.data.length,0);
-        badgeEl.textContent = `Series: ${datasets.length} · Points: ${pointCount}`;
+        titleEl.textContent = `${from} to ${to} (${modeLabel(modeSel)})`;
+        pairMetaEl.textContent = `Source amount on a log scale. Fee shown in basis points.`;
+        badgeEl.textContent = `${datasets.length} series / ${nf0.format(pointCount)} quotes`;
+        bestFeeEl.textContent = pointCount ? `Lowest fee ${nf2.format(stats.min)} bps` : "No quotes";
+        emptyState.hidden = pointCount > 0;
 
-        const data={datasets};
-        const options={
-          responsive:true, maintainAspectRatio:false, animation:false,
-          plugins:{
-            legend:{position:'top'},
-            tooltip:{callbacks:{label: c => `${c.dataset.label}: amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}
-          },
-          scales:{
-            x:{type:'logarithmic',
-               min: datasets.length?Math.min(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):10,
-               max: datasets.length?Math.max(...datasets.flatMap(ds=>ds.data.map(p=>p.x))):1_000_000,
-               ticks:{color:axisTick, callback:v=>fmtK(v)},
-               grid:{color:axisGrid},
-               title:{display:true,text:'Source Amount',color:axisTick}},
-            y:Object.assign(
-              {title:{display:true,text:'Fee (bps)',color:axisTick},grid:{color:axisGrid}},
-              useLog
-                ? {type:'logarithmic',min:y0,max:y1,ticks:{color:axisTick}}
-                : {type:'linear',min:y0,max:y1,ticks:{color:axisTick, callback:v=>nf0.format(v)}}
-            )
-          }
-        };
-        if(!chart){ chart=new Chart(ctx,{type:'line',data,options}); } else { chart.data=data; chart.options=options; chart.update(); }
-        attachTable(rows, from, to, modeSel);
+        if (!chart){
+          chart = new Chart(ctx, { type: "line", data, options });
+        } else {
+          chart.data = data;
+          chart.options = options;
+          chart.update();
+        }
+
+        const tableRows = attachTable(rows, from, to, modeSel);
+        tableCountEl.textContent = `${nf0.format(tableRows)} rows`;
       }
 
-      fromEl.addEventListener('change', renderSingle);
-      toEl.addEventListener('change', renderSingle);
-      modeEl.addEventListener('change', ()=>{ renderSingle(); renderAll(); });
-      yscaleEl.addEventListener('change', ()=>{ renderSingle(); renderAll(); });
-      swapBtn.addEventListener('click', ()=>{ const a=fromEl.value; fromEl.value=toEl.value; toEl.value=a; renderSingle(); });
+      function isAllVisible(){
+        return !document.getElementById("tab-all").hidden;
+      }
 
-      // ---------- Tabs ----------
-      const tabs=document.querySelectorAll('.tabbtn');
-      tabs.forEach(b=>b.onclick=()=>{ tabs.forEach(t=>t.classList.remove('active')); b.classList.add('active');
-        document.getElementById('tab-single').style.display = b.dataset.tab==='single'?'':'none';
-        document.getElementById('tab-all').style.display = b.dataset.tab==='all'?'':'none';
-        if(b.dataset.tab==='all') renderAll();
+      function isCompareVisible(){
+        return !document.getElementById("tab-compare").hidden;
+      }
+
+      function compareSourceDefaults(target){
+        const preferred = ["GBP", "EUR", "SGD", "IDR", "MYR", "USD", "AUD", "CAD", "CNY"];
+        const available = preferred.concat(curList.filter(currency => !preferred.includes(currency)));
+        return available.filter(currency => currency !== target && curList.includes(currency) && hasCompareData(currency, target)).slice(0, 6);
+      }
+
+      function hasCompareData(source, target){
+        return rows.some(row => currencyOf(row, "src") === source && currencyOf(row, "tgt") === target && Number.isFinite(yVal(row)) && Number.isFinite(xUsdVal(row, usdRates)));
+      }
+
+      function ensureCompareSources(useDefaults = false){
+        const target = toEl.value;
+        if (activeCompareSources === null || useDefaults){
+          activeCompareSources = new Set(compareSourceDefaults(target));
+          return;
+        }
+        activeCompareSources = new Set(Array.from(activeCompareSources).filter(source => source !== target && curList.includes(source)));
+      }
+
+      fromEl.addEventListener("change", () => {
+        activeSrc = fromEl.value;
+        renderSingle();
+        if (isAllVisible()){
+          buildPills();
+          renderAll();
+        }
+        if (isCompareVisible()){
+          buildComparePills();
+          renderCompare();
+        }
+      });
+      toEl.addEventListener("change", () => {
+        renderSingle();
+        if (isCompareVisible()){
+          ensureCompareSources(true);
+          buildComparePills();
+          renderCompare();
+        }
+      });
+      modeEl.addEventListener("change", () => {
+        renderSingle();
+        if (isAllVisible()) renderAll();
+        if (isCompareVisible()) renderCompare();
+      });
+      yscaleEl.addEventListener("change", () => {
+        renderSingle();
+        if (isAllVisible()) renderAll();
+        if (isCompareVisible()) renderCompare();
+      });
+      swapBtn.addEventListener("click", () => {
+        const previousFrom = fromEl.value;
+        fromEl.value = toEl.value;
+        toEl.value = previousFrom;
+        activeSrc = fromEl.value;
+        renderSingle();
+        if (isAllVisible()){
+          buildPills();
+          renderAll();
+        }
+        if (isCompareVisible()){
+          ensureCompareSources(true);
+          buildComparePills();
+          renderCompare();
+        }
       });
 
-      // ---------- All-from-source ----------
-      const srcPills=document.getElementById('src-pills'), allGrid=document.getElementById('all-grid'), allSrcLbl=document.getElementById('all-src'), allModeLbl=document.getElementById('all-mode');
-      let activeSrc = curList.includes('USD') ? 'USD' : curList[0];
+      const tabs = document.querySelectorAll(".tabbtn");
+
+      function setActiveTab(tabName, updateHash = false){
+        const nextTab = ["all", "compare"].includes(tabName) ? tabName : "single";
+        tabs.forEach(tabButton => {
+          const active = tabButton.dataset.tab === nextTab;
+          tabButton.classList.toggle("active", active);
+          tabButton.setAttribute("aria-selected", String(active));
+        });
+        document.getElementById("tab-single").hidden = nextTab !== "single";
+        document.getElementById("tab-all").hidden = nextTab !== "all";
+        document.getElementById("tab-compare").hidden = nextTab !== "compare";
+        if (updateHash) history.replaceState(null, "", `#${nextTab}`);
+        if (nextTab === "all"){
+          buildPills();
+          renderAll();
+        }
+        if (nextTab === "compare"){
+          ensureCompareSources(activeCompareSources === null);
+          buildComparePills();
+          renderCompare();
+        }
+      }
+
+      tabs.forEach(button => {
+        button.addEventListener("click", () => setActiveTab(button.dataset.tab, true));
+      });
+      window.addEventListener("hashchange", () => setActiveTab(location.hash.replace("#", "")));
+
+      const srcPills = document.getElementById("src-pills");
+      const allGrid = document.getElementById("all-grid");
+      const allSrcLabel = document.getElementById("all-src");
+      const allModeLabel = document.getElementById("all-mode");
+      const compareSourcePills = document.getElementById("compare-source-pills");
 
       function buildPills(){
-        srcPills.innerHTML='';
-        curList.forEach(c=>{
-          const btn=document.createElement('button'); btn.textContent=c; btn.className='pill'+(c===activeSrc?' active':'');
-          btn.onclick=()=>{ activeSrc=c; renderAll(); buildPills(); };
+        srcPills.innerHTML = "";
+        curList.forEach(currency => {
+          const hasOutgoing = filterFrom(rows, currency).length > 0;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = currency;
+          btn.className = `source-pill${currency === activeSrc ? " active" : ""}`;
+          btn.setAttribute("aria-pressed", String(currency === activeSrc));
+          btn.disabled = !hasOutgoing;
+          if (!hasOutgoing) btn.title = "No data in the current snapshot";
+          btn.onclick = () => {
+            activeSrc = currency;
+            buildPills();
+            renderAll();
+          };
           srcPills.appendChild(btn);
         });
       }
 
       function renderAll(){
-        allGrid.innerHTML='';
-        const modeSel=modeEl.value, scaleSel=yscaleEl.value;
-        allSrcLbl.textContent=activeSrc; allModeLbl.textContent=modeSel;
+        allCharts.forEach(chartInstance => chartInstance.destroy());
+        allCharts = [];
+        allGrid.innerHTML = "";
 
-        // All targets from active source ordered by priority
-        const targSet = new Set(filterFrom(rows, activeSrc).map(r=>r.tgt ?? r.targetCurrency));
-        const allTargs = Array.from(targSet).filter(t=>t!==activeSrc);
-        const prio = ["USD","GBP","EUR","CNY","SGD"];
-        const ordered = prio.filter(x=>allTargs.includes(x)).concat(allTargs.filter(x=>!prio.includes(x)).sort());
+        const modeSel = modeEl.value;
+        const scaleSel = yscaleEl.value;
+        allSrcLabel.textContent = activeSrc;
+        allModeLabel.textContent = `(${modeLabel(modeSel)})`;
 
-        ordered.forEach((tgt, idx)=>{
-          const card=document.createElement('div'); card.className='card mini';
-          card.style.animationDelay = `${Math.min(idx * 45, 360)}ms`;
-          const title=document.createElement('div'); title.className='title'; title.textContent=`${activeSrc}->${tgt}`;
-          const canv=document.createElement('canvas'); canv.height=280;
-          card.appendChild(title); card.appendChild(canv); allGrid.appendChild(card);
+        const targetSet = new Set(filterFrom(rows, activeSrc).map(row => currencyOf(row, "tgt")));
+        const allTargets = Array.from(targetSet).filter(target => target && target !== activeSrc);
+        const priority = ["USD", "GBP", "EUR", "CNY", "SGD"];
+        const ordered = priority.filter(currency => allTargets.includes(currency)).concat(allTargets.filter(currency => !priority.includes(currency)).sort());
 
-          const items=filterPair(rows, activeSrc, tgt);
-          const datasets=buildDatasets(items, modeSel, activeSrc, tgt);
-          const {min,max}=yStats(datasets);
-          const useLog=(scaleSel==='log')||(scaleSel==='auto' && max && (max>500 || (min>0&&(max/min)>50)));
-          const {y0,y1}=useLog?logDomain(min||0.1,max||1):linearDomain(min||0,max||1);
+        if (!ordered.length){
+          const empty = document.createElement("div");
+          empty.className = "error-panel";
+          empty.textContent = "No target currencies available for this source.";
+          allGrid.appendChild(empty);
+          return;
+        }
 
-          new Chart(canv.getContext('2d'),{
-            type:'line',
-            data:{datasets},
-            options:{
-              responsive:true, maintainAspectRatio:false, animation:false,
-              plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>`amount ${c.parsed.x}, fee ${c.parsed.y.toFixed(2)} bps`}}},
-              scales:{
-                x:{type:'logarithmic',ticks:{color:axisTick, callback:v=>fmtK(v)},grid:{color:axisGrid}},
-                y:Object.assign({},
-                  useLog
-                    ? {type:'logarithmic',min:y0,max:y1,ticks:{color:axisTick},grid:{color:axisGrid}}
-                    : {type:'linear',min:y0,max:y1,ticks:{color:axisTick, callback:v=>nf0.format(v)},grid:{color:axisGrid}}
-                )
-              }
-            }
-          });
+        ordered.forEach(target => {
+          const card = document.createElement("article");
+          card.className = "panel-card mini";
+
+          const head = document.createElement("div");
+          head.className = "mini-head";
+
+          const title = document.createElement("div");
+          title.className = "title";
+          title.textContent = `${activeSrc} to ${target}`;
+
+          const count = document.createElement("span");
+          count.className = "mini-count";
+
+          head.appendChild(title);
+          head.appendChild(count);
+
+          const wrap = document.createElement("div");
+          wrap.className = "chart-wrap";
+          const canvas = document.createElement("canvas");
+          canvas.setAttribute("aria-label", `${activeSrc} to ${target} fee curve`);
+          canvas.setAttribute("role", "img");
+          wrap.appendChild(canvas);
+
+          card.appendChild(head);
+          card.appendChild(wrap);
+          allGrid.appendChild(card);
+
+          const items = filterPair(rows, activeSrc, target);
+          const datasets = buildDatasets(items, modeSel);
+          const pointCount = datasets.reduce((sum, ds) => sum + ds.data.length, 0);
+          count.textContent = `${nf0.format(pointCount)} quotes`;
+
+          const miniOptions = chartOptions(datasets, scaleSel);
+          miniOptions.plugins.legend.display = false;
+          miniOptions.scales.x.title.display = false;
+          miniOptions.scales.y.title.display = false;
+          miniOptions.layout.padding = { top: 0, right: 2, bottom: 0, left: 0 };
+
+          allCharts.push(new Chart(canvas.getContext("2d"), {
+            type: "line",
+            data: { datasets },
+            options: miniOptions
+          }));
         });
       }
 
+      function buildComparePills(){
+        ensureCompareSources();
+        const target = toEl.value;
+        compareSourcePills.innerHTML = "";
+        const noneBtn = document.createElement("button");
+        const activateNone = event => {
+          event.preventDefault();
+          activeCompareSources = new Set();
+          buildComparePills();
+          renderCompare();
+        };
+        noneBtn.type = "button";
+        noneBtn.textContent = "None";
+        noneBtn.className = `source-pill${activeCompareSources.size === 0 ? " active" : ""}`;
+        noneBtn.setAttribute("aria-pressed", String(activeCompareSources.size === 0));
+        noneBtn.onclick = activateNone;
+        noneBtn.onmousedown = activateNone;
+        noneBtn.onkeydown = event => {
+          if (event.key === "Enter" || event.key === " "){
+            activateNone(event);
+          }
+        };
+        compareSourcePills.appendChild(noneBtn);
+        curList.filter(currency => currency !== target).forEach(currency => {
+          const hasData = hasCompareData(currency, target);
+          const active = activeCompareSources.has(currency);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = currency;
+          btn.className = `source-pill${active ? " active" : ""}`;
+          btn.setAttribute("aria-pressed", String(active));
+          btn.disabled = !hasData;
+          if (!hasData) btn.title = "No data in the current snapshot";
+          btn.onclick = () => {
+            if (activeCompareSources.has(currency)){
+              activeCompareSources.delete(currency);
+            } else {
+              activeCompareSources.add(currency);
+            }
+            ensureCompareSources();
+            buildComparePills();
+            renderCompare();
+          };
+          compareSourcePills.appendChild(btn);
+        });
+      }
+
+      function renderCompare(){
+        ensureCompareSources();
+        const target = toEl.value;
+        const modeSel = modeEl.value;
+        const scaleSel = yscaleEl.value;
+        const sources = Array.from(activeCompareSources).filter(source => source !== target);
+        const datasets = buildCorridorDatasets(rows, sources, target, modeSel, usdRates);
+        const pointCount = datasets.reduce((sum, ds) => sum + ds.data.length, 0);
+        const stats = yStats(datasets);
+        const data = { datasets };
+        const options = chartOptions(datasets, scaleSel, "Approx. USD notional", "USD notional");
+
+        compareTitleEl.textContent = `Costs into ${target} (${modeLabel(modeSel)})`;
+        compareMetaEl.textContent = `Selected sources are compared on an approximate USD-notional x-axis so transfer sizes line up across currencies.`;
+        compareLowestEl.textContent = pointCount ? `Lowest fee ${nf2.format(stats.min)} bps` : "No quotes";
+        compareCountEl.textContent = `${datasets.length} corridors / ${nf0.format(pointCount)} quotes`;
+        compareEmptyEl.hidden = pointCount > 0;
+
+        if (!compareChart){
+          compareChart = new Chart(compareCtx, { type: "line", data, options });
+        } else {
+          compareChart.data = data;
+          compareChart.options = options;
+          compareChart.update();
+        }
+      }
+
       buildPills();
-      renderSingle(); // initial
-    })().catch(err=>{
-      document.getElementById('tab-single').innerHTML='<div class="muted">Failed to load charts: '+err.message+'</div>';
+      renderSingle();
+      setActiveTab(location.hash.replace("#", ""));
+    })().catch(err => {
+      document.getElementById("tab-single").innerHTML = `<div class="error-panel">Failed to load charts: ${err.message}</div>`;
       console.error(err);
     });
   </script>

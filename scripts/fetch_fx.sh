@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/fetch_fx.sh
-# Fetch Wise FX quotes (G20 + SGD) both directions.
+# Fetch Wise FX quotes across the public dashboard currency set.
 # Amount ladders are built from USD anchors ($10 … $10M) converted per source,
 # rounded DOWN so the USD-notional cap isn't breached.
 # fee_bps = fee_total / sourceAmount * 10,000.
@@ -11,8 +11,8 @@ set -o pipefail
 API_BASE="${WISE_API_BASE:-https://api.transferwise.com}"
 : "${WISE_TOKEN?Need env WISE_TOKEN set (GitHub Secret WISE_TOKEN)}"
 
-# G20 + SGD (override via env CURRENCIES="USD,GBP,...")
-CURRENCIES_CSV="${CURRENCIES:-AUD,ARS,BRL,CAD,CNY,EUR,INR,IDR,JPY,MXN,RUB,SAR,ZAR,KRW,TRY,GBP,USD,SGD}"
+# Dashboard currency set (override via env CURRENCIES="USD,GBP,...")
+CURRENCIES_CSV="${CURRENCIES:-AUD,ARS,BRL,CAD,CNY,EUR,INR,IDR,JPY,MXN,MYR,KRW,TRY,GBP,USD,SGD}"
 IFS=',' read -r -a CCYS <<< "$CURRENCIES_CSV"
 
 # USD anchor ladder: denser 10k–100k + top at 10M
